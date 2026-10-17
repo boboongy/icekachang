@@ -1,0 +1,35 @@
+{
+  "_note": "Ingredients and recipes for the making view. Read by tools/blender/build_stall.py (tub and bottle placement, colours) and by scripts/making/*. Colours are 0-255 RGB. Bases go in a vessel: glass bowl (shaved at the shaver) or white soup bowl (ladled at the pot). Toppings sit in tubs (slot = position in the 4x2 tub grid, row-major from the front-left); sides sit on their own plate by the pot; sauces sit in the bottle row (slot = left to right). shape stick = long pieces (you tiao).",
+  "ingredients": {
+    "ice":            {"name": "Shaved ice",    "kind": "base",    "vessel": "glass", "color": [238, 244, 250]},
+    "milk_ice":       {"name": "Milk ice",      "kind": "base",    "vessel": "glass", "color": [252, 240, 214]},
+    "tau_suan_soup":  {"name": "Mung bean soup", "kind": "base",   "vessel": "soup",  "color": [228, 200, 100], "color2": [206, 172, 72]},
+
+    "you_tiao":       {"name": "You tiao",      "kind": "side",    "color": [192, 116, 40], "color2": [226, 164, 72], "size": 0.02, "count": 4, "shape": "stick"},
+
+    "red_bean":       {"name": "Red beans",     "kind": "topping", "slot": 0, "color": [120, 32, 40],  "color2": [86, 20, 28],   "size": 0.012, "count": 9},
+    "corn":           {"name": "Sweet corn",    "kind": "topping", "slot": 1, "color": [252, 214, 56], "color2": [232, 180, 30], "size": 0.011, "count": 9},
+    "attap":          {"name": "Attap seeds",   "kind": "topping", "slot": 2, "color": [244, 244, 226], "color2": [214, 220, 200], "size": 0.016, "count": 5},
+    "grass_jelly":    {"name": "Grass jelly",   "kind": "topping", "slot": 3, "color": [42, 36, 38],   "color2": [70, 60, 62],   "size": 0.02,  "count": 4},
+    "jelly":          {"name": "Jelly cubes",   "kind": "topping", "slot": 4, "color": [236, 52, 64],  "color2": [64, 204, 104], "size": 0.017, "count": 6},
+    "mango":          {"name": "Diced mango",   "kind": "topping", "slot": 5, "color": [255, 172, 32], "color2": [244, 136, 22], "size": 0.02,  "count": 7},
+    "pandan":         {"name": "Pandan jelly",  "kind": "topping", "slot": 6, "color": [72, 194, 82],  "color2": [44, 150, 54],  "size": 0.01,  "count": 12},
+    "durian":         {"name": "Durian paste",  "kind": "topping", "slot": 7, "color": [240, 214, 108], "color2": [222, 190, 80], "size": 0.024, "count": 4},
+
+    "rose":           {"name": "Rose syrup",      "kind": "sauce", "slot": 0, "container": "bottle", "color": [236, 72, 116], "coverage": 60, "from_ring": 0},
+    "mango_sauce":    {"name": "Mango sauce",     "kind": "sauce", "slot": 1, "container": "bottle", "color": [255, 156, 24], "coverage": 65, "from_ring": 2},
+    "gula_melaka":    {"name": "Gula melaka",     "kind": "sauce", "slot": 2, "container": "bottle", "color": [112, 62, 30],  "coverage": 50, "from_ring": 1},
+    "evap_milk":      {"name": "Evaporated milk", "kind": "sauce", "slot": 3, "container": "can",    "color": [252, 246, 226], "coverage": 30, "from_ring": 1},
+    "condensed_milk": {"name": "Condensed milk",  "kind": "sauce", "slot": 4, "container": "can",    "color": [255, 236, 190], "coverage": 40, "from_ring": 2},
+    "coconut_milk":   {"name": "Coconut milk",    "kind": "sauce", "slot": 5, "container": "carton", "color": [255, 254, 246], "coverage": 45, "from_ring": 1}
+  },
+  "recipes": {
+    "ice_kachang":        {"base": "ice",      "toppings": ["red_bean", "corn", "attap", "grass_jelly", "jelly"], "sauces": ["rose", "evap_milk"]},
+    "ice_kachang_mango":  {"base": "ice",      "toppings": ["red_bean", "corn", "attap", "grass_jelly", "jelly", "mango"], "sauces": ["rose", "mango_sauce", "evap_milk"]},
+    "ice_kachang_durian": {"base": "ice",      "toppings": ["red_bean", "corn", "attap", "grass_jelly", "jelly", "durian"], "sauces": ["rose", "evap_milk"]},
+    "mango_milk_ice":     {"base": "milk_ice", "toppings": ["mango"], "sauces": ["mango_sauce", "condensed_milk"]},
+    "chendol":            {"base": "ice",      "toppings": ["pandan", "red_bean"], "sauces": ["coconut_milk", "gula_melaka"]},
+    "chendol_durian":     {"base": "ice",      "toppings": ["pandan", "red_bean", "durian"], "sauces": ["coconut_milk", "gula_melaka"]},
+    "tau_suan":           {"base": "tau_suan_soup", "toppings": ["you_tiao"], "sauces": []}
+  }
+}

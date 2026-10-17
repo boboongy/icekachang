@@ -1,0 +1,17 @@
+[remap]
+
+importer="font_data_bmfont"
+type="FontFile"
+uid="uid://be8l8yylyq8i2"
+path="res://.godot/imported/pixel_outline.fnt-34a1ce86707a96afa55d49eac0c6463c.fontdata"
+
+[deps]
+
+source_file="res://assets/fonts/pixel_outline.fnt"
+dest_files=["res://.godot/imported/pixel_outline.fnt-34a1ce86707a96afa55d49eac0c6463c.fontdata"]
+
+[params]
+
+fallbacks=[]
+compress=true
+scaling_mode=2
