@@ -4,6 +4,7 @@ class_name RecipeBook
 
 const FULL_ICE := 0.85   # fill at or above this counts as a full, tidy mound
 const MIN_ICE := 0.25    # less than this is not a dessert yet
+const TOO_MUCH_ICE := 0.6   # cold soup: this much shaved ice or more in the soup bowl costs a star
 
 static var _ingredients := {}
 static var _recipes := {}
@@ -46,9 +47,26 @@ static func of_kind(kind: String) -> Array[String]:
 	return out
 
 
-static func recipe(item_id: String) -> Dictionary:
+## cold: the cold version (bobo chacha): its "ice" key names the shaved ice (the recipe's
+## "cold_ice") that goes in the soup bowl too. Recipes without "ice" want none in a soup.
+static func recipe(item_id: String, cold := false) -> Dictionary:
 	_load()
-	return _recipes[item_id]
+	var r: Dictionary = _recipes[item_id]
+	if cold and r.has("cold_ice"):
+		r = r.duplicate(true)
+		r.ice = r.cold_ice
+	return r
+
+
+## True if the dessert can also be ordered cold.
+static func has_cold(item_id: String) -> bool:
+	_load()
+	return _recipes.has(item_id) and _recipes[item_id].has("cold_ice")
+
+
+## Order name, "Cold bobo chacha" for a cold order.
+static func order_name(item_id: String, cold := false) -> String:
+	return ("Cold " + item_name(item_id).to_lower()) if cold else item_name(item_id)
 
 
 ## Which bowl a dessert is made in: "glass" (ice) or "soup".
@@ -96,10 +114,21 @@ static func makeable(start_unlocked_only := false) -> Array[String]:
 	return out
 
 
+## Every menu id in lightbox order (menu.json "no").
+static func board() -> Array[String]:
+	_load()
+	var out: Array[String] = []
+	out.assign(_menu.keys())
+	out.sort_custom(func(a, b): return int(_menu[a].no) < int(_menu[b].no))
+	return out
+
+
 ## Every ingredient the recipe needs, base first, as {id, done} rows for the order card.
-static func checklist(item_id: String, bowl: Dictionary) -> Array:
-	var r := recipe(item_id)
+static func checklist(item_id: String, bowl: Dictionary, cold := false) -> Array:
+	var r := recipe(item_id, cold)
 	var rows := [{"id": r.base, "done": bowl.base == r.base and bowl.fill >= MIN_ICE}]
+	if r.has("ice"):
+		rows.append({"id": r.ice, "done": bowl.get("ice", 0.0) > 0.0})
 	for t in r.toppings:
 		rows.append({"id": t, "done": t in bowl.toppings})
 	for s in r.sauces:
@@ -107,11 +136,13 @@ static func checklist(item_id: String, bowl: Dictionary) -> Array:
 	return rows
 
 
-## bowl: {base, fill, toppings, sauces, fixes}. Returns {correct, stars (0-3), missing, extra}.
+## bowl: {vessel, base, fill, ice, toppings, sauces, fixes}. Returns {correct, stars (0-3), missing, extra}.
 ## Correct = right ice or soup, every topping and sauce, nothing else. Stars: 1 for correct,
 ## +1 for a full bowl (mound or soup), +1 when no topping had to be taken back out.
-static func judge(item_id: String, bowl: Dictionary) -> Dictionary:
-	var r := recipe(item_id)
+## A cold soup needs some shaved ice (a full mound of it, TOO_MUCH_ICE, costs a star); shaved
+## ice in a warm soup is extra.
+static func judge(item_id: String, bowl: Dictionary, cold := false) -> Dictionary:
+	var r := recipe(item_id, cold)
 	var missing: Array[String] = []
 	var extra: Array[String] = []
 	if bowl.base != r.base or bowl.fill < MIN_ICE:
@@ -124,8 +155,15 @@ static func judge(item_id: String, bowl: Dictionary) -> Dictionary:
 	for t in bowl.toppings + bowl.sauces:
 		if not (t in r.toppings or t in r.sauces):
 			extra.append(t)
+	var ice: float = bowl.get("ice", 0.0)
+	if r.has("ice") and ice <= 0.0:
+		missing.append(r.ice)
+	elif not r.has("ice") and ice > 0.0:
+		extra.append("ice")
 	var correct := missing.is_empty() and extra.is_empty()
 	var stars := 0
 	if correct:
 		stars = 1 + int(bowl.fill >= FULL_ICE) + int(bowl.fixes == 0)
+		if ice >= TOO_MUCH_ICE:
+			stars = maxi(stars - 1, 1)
 	return {"correct": correct, "stars": stars, "missing": missing, "extra": extra}

@@ -23,6 +23,16 @@ const PAUSE_RECT := Rect2(4, 3, 15, 13)    ## HUD pause button (screen px)
 ## Vertical FOV per view; positions come from the cam_<view> markers in the glb.
 ## Keep in sync with CAMERAS in tools/blender/build_stall.py (preview renders).
 const VIEW_FOV := {"waiting": 46.0, "making": 50.0}
+## Render height per view (window/size/viewport_* in project.godot = the waiting view). The
+## making view renders at twice the pixels so the bowl and its contents are sharper; the UI
+## stays laid out at 270 px high (UiKit.ui_scale).
+const RES := {"waiting": 1, "making": 2}
+const BASE_RES := Vector2i(480, 270)
+## Lightbox tile layout in menu.png, as tools/blender/build_stall.py paints it (MENU_*):
+## tiles of 21 x 19 texels (with a 1 texel gap), 10 per row from y 1, a short row centred.
+const BOARD_TILE := Vector2i(21, 19)
+const BOARD_COLS := 10
+const BOARD_DARK := 0.3                     ## unbought tiles: lights off
 const LIGHT := {
 	"sunny": {"bg": Color(0.98, 0.8, 0.55), "ambient": Color(0.96, 0.84, 0.68), "ambient_energy": 0.32,
 		"contrast": 1.12, "saturation": 1.2, "fog": Color(1.0, 0.86, 0.66), "fog_density": 0.0015,
@@ -60,12 +70,17 @@ var _uncle_head: Node3D
 var _uncle_arms: Array[Node3D] = []
 var _fans: Array[Node3D] = []
 var _views := {}     # view name -> Transform3D
+var _ui_layer: CanvasLayer
+var _ui_root: Control  # all UI; sized to the screen / UiKit.ui_scale
+var _board_for: Array[String] = []   # the menu the lightbox shows lit
 
 
 func _ready() -> void:
 	_model = STALL_GLB.instantiate()
 	add_child(_model)
 	RetroMaterials.apply(_model)
+	paint_board()
+	Game.money_changed.connect(func(_c): paint_board())    # a buy, a load or starting over
 	for view in VIEW_FOV:
 		var at := (_model.find_child("cam_" + view, true, false) as Node3D).global_position
 		var target := (_model.find_child("cam_%s_target" % view, true, false) as Node3D).global_position
@@ -135,6 +150,47 @@ func _ready() -> void:
 			test.run(self)
 
 
+## Lights the lightbox tiles of the items on the menu (Game.unlocked) and darkens the rest.
+## Only repaints when the menu changed.
+func paint_board() -> void:
+	if _board_for == Game.unlocked:
+		return
+	_board_for = Game.unlocked.duplicate()
+	var img := RetroMaterials.MENU.get_image().duplicate() as Image   # get_image() can be the cached copy (headless)
+	var items := RecipeBook.board()
+	for i in items.size():
+		if items[i] in Game.unlocked:
+			continue
+		var at := _board_tile(i, items.size(), img.get_width())
+		for y in BOARD_TILE.y - 1:
+			for x in BOARD_TILE.x - 1:
+				var c := img.get_pixel(at.x + x, at.y + y)
+				img.set_pixel(at.x + x, at.y + y, Color(c.r * BOARD_DARK, c.g * BOARD_DARK, c.b * BOARD_DARK))
+	var m := RetroMaterials.get_material("menu") as StandardMaterial3D
+	m.albedo_texture = ImageTexture.create_from_image(img)
+
+
+## Top-left texel of board tile i of `count` in a texture `w` wide.
+func _board_tile(i: int, count: int, w: int) -> Vector2i:
+	@warning_ignore("integer_division")
+	var row := i / BOARD_COLS
+	var n := mini(BOARD_COLS, count - row * BOARD_COLS)
+	@warning_ignore("integer_division")
+	return Vector2i((w - n * BOARD_TILE.x) / 2 + (i % BOARD_COLS) * BOARD_TILE.x, 1 + row * BOARD_TILE.y)
+
+
+## Is the board tile of `item_id` lit? Compares its whole tile with menu.png (tests).
+func board_lit(item_id: String) -> bool:
+	var img := ((RetroMaterials.get_material("menu") as StandardMaterial3D).albedo_texture as Texture2D).get_image()
+	var src := RetroMaterials.MENU.get_image()
+	var at := _board_tile(RecipeBook.board().find(item_id), RecipeBook.board().size(), img.get_width())
+	for y in BOARD_TILE.y - 1:
+		for x in BOARD_TILE.x - 1:
+			if not img.get_pixel(at.x + x, at.y + y).is_equal_approx(src.get_pixel(at.x + x, at.y + y)):
+				return false
+	return true
+
+
 func _build_environment() -> void:
 	_env = Environment.new()
 	_env.background_mode = Environment.BG_COLOR
@@ -174,8 +230,12 @@ func _apply_weather(w: String) -> void:
 
 
 func _build_ui(making_ui: MakingUI) -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
+	_ui_layer = CanvasLayer.new()
+	add_child(_ui_layer)
+	var layer := Control.new()
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui_layer.add_child(layer)
+	_ui_root = layer
 	layer.add_child(rain)
 	layer.add_child(bubbles)
 	layer.add_child(making_ui)
@@ -217,6 +277,7 @@ func _build_ui(making_ui: MakingUI) -> void:
 
 func _on_size_changed() -> void:
 	var size := get_viewport().get_visible_rect().size
+	_ui_root.size = size / UiKit.ui_scale
 	_portrait = size.x < size.y
 	_rotate_overlay.visible = _portrait
 	_update_pause()
@@ -346,7 +407,7 @@ func _input(event: InputEvent) -> void:
 		return
 	var key: bool = event is InputEventKey and event.pressed and not event.echo \
 		and (event.keycode == KEY_ESCAPE or event.keycode == KEY_P)
-	var tap: bool = event is InputEventScreenTouch and event.pressed and PAUSE_RECT.grow(5).has_point(event.position)
+	var tap: bool = event is InputEventScreenTouch and event.pressed 		and PAUSE_RECT.grow(5).has_point(UiKit.to_ui(event.position))
 	if key or tap:
 		Sound.play("click")
 		pause()
@@ -362,22 +423,27 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_M and not _making and not day_panel.visible:
 			start_order()
 	elif event is InputEventScreenTouch and event.pressed and not _making and not day_panel.visible:
-		var c := bubbles.hit_front(event.position)
-		if bubbles.hit_mute(event.position):
+		var at := UiKit.to_ui(event.position)
+		var c := bubbles.hit_front(at)
+		if bubbles.hit_mute(at):
 			Game.set_muted(not Game.muted)
 			Sound.play("click")
 		elif c:
-			start_order(c.item_id, c)
+			start_order(c.item_id, c, c.cold)
 
 
 ## Go to the making view for `item_id` (random from the unlocked menu if empty), made for
-## customer `c` (null = dev order, nobody pays).
-func start_order(item_id := "", c: Customer = null) -> void:
+## customer `c` (null = dev order, nobody pays). `cold`: the cold bobo chacha. A customer's
+## 2-dessert order makes both (their first one may already wait on the tray).
+func start_order(item_id := "", c: Customer = null, cold := false) -> void:
 	if item_id == "":
 		item_id = Game.unlocked.pick_random()
 	_serving = c
 	_set_view("making")
-	station.begin(item_id)
+	if c and c.item2 != "":
+		station.begin(item_id, cold, c.orders(), c.made)
+	else:
+		station.begin(item_id, cold)
 
 
 func _on_served(_item: String, res: Dictionary) -> void:
@@ -390,6 +456,7 @@ func _on_served(_item: String, res: Dictionary) -> void:
 
 func _set_view(view: String) -> void:
 	_making = view == "making"
+	_set_res(RES[view])
 	if not _making:
 		station.end()
 		if _day_done_pending:
@@ -404,15 +471,28 @@ func _set_view(view: String) -> void:
 	tw.tween_property(cam, "fov", VIEW_FOV[view], 0.7)
 
 
+## Render at BASE_RES * k (k = 1 or 2) with the UI scaled by k, so UI coordinates do not change.
+func _set_res(k: int) -> void:
+	if UiKit.ui_scale == k:
+		return
+	UiKit.ui_scale = k
+	_ui_layer.scale = Vector2(k, k)
+	get_window().content_scale_size = BASE_RES * k
+	_on_size_changed()
+
+
 ## Dev only: save a screenshot of each view to build/ and quit. The waiting shot has a full
 ## queue; the making shot is staged half way through an ice kachang so the bowl, toppings and
 ## syrup show, the soup shot with a finished tau suan; then the day summary and the shop with
 ## made-up numbers (shots never save). Menus and tutorial steps 1 and 2 come first.
+var _lineup: Array[Node] = []       # shots only: the fruit ices lined up
+
+
 func _take_shots() -> void:
 	queue.spawning = false
 	queue.debug_fill()
-	for view in ["title", "settings", "pause", "waiting", "rainy", "tut_wait", "tut_make",
-			"making", "bowl_zoom", "soup", "summary", "shop"]:
+	for view in ["title", "settings", "pause", "waiting", "cust_zoom", "rainy", "tut_wait", "tut_make",
+			"making", "bowl_zoom", "fruits", "ices", "soups", "soup", "chacha", "pulut", "two", "summary", "shop"]:
 		if view == "title":
 			menus.show_title()
 		elif view == "settings":
@@ -421,9 +501,18 @@ func _take_shots() -> void:
 			menus.show_pause()
 		elif view == "waiting":
 			menus.hide_menus()
+		elif view == "cust_zoom":    # close look at the queue (customer faces and clothes)
+			cam.fov = 16.0
+			cam.look_at(Vector3(-1.6, 1.3, 0.95))
 		elif view == "rainy":
+			cam.global_transform = _views.waiting
+			cam.fov = VIEW_FOV.waiting
 			Game.weather = "rainy"
 			_apply_weather("rainy")
+			var front := queue.line[0]       # a 2-dessert order, the first one made (tick)
+			front.item2 = "tau_suan" if front.item_id != "tau_suan" else "ice_kachang"
+			front.made = {front.item_id: {}}
+			front.order_line = CustomerQueue.TWO_LINES[0]
 			bubbles.show_banner("DAY 2", "Rainy day")
 		elif view == "tut_wait":
 			Game.weather = "sunny"
@@ -437,13 +526,49 @@ func _take_shots() -> void:
 		elif view == "bowl_zoom":    # close look at the glass bowls (stack + the one being made)
 			cam.fov = 22.0
 			cam.look_at(station.bowl.global_position.lerp(station._spot.bowl_stack, 0.5) + Vector3(0, 0.06, 0))
-		elif view == "soup":
+		elif view in ["fruits", "ices", "soups"]:   # the fruit ices / other ices / soups finished, side by side (each must look different)
+			for n in _lineup:
+				n.queue_free()
+			_lineup.clear()
+			var items := ["ice_lychee", "ice_longan", "ice_sea_coconut", "ice_soursop", "red_ruby_ice", "ice_jelly_cocktail"]
+			if view == "ices":
+				items = ["ice_kachang", "ice_kachang_mango", "ice_kachang_durian", "chendol", "chendol_durian", "mango_milk_ice"]
+			if view == "soups":
+				items =["green_bean_soup", "red_bean_soup", "sweet_potato_soup", "cheng_tng", "bobo_chacha", "pulut_hitam"]
+			for i in items.size():
+				var cup := (station.bowl._soup if view == "soups" else station.bowl._glass).duplicate() as MeshInstance3D
+				add_child(cup)
+				var b := Bowl.new(null, cup) if view == "soups" else Bowl.new(cup, null)
+				add_child(b)
+				b.set_vessel(RecipeBook.vessel(items[i]))
+				var r := RecipeBook.recipe(items[i])
+				b.base = r.base
+				b.fill = 1.0
+				b.toppings.assign(r.toppings)
+				b.sauces.assign(r.sauces)
+				b.rebuild()
+				b.global_position = Vector3(-0.05 - i * 0.2, station._bench_y, -2.0)   # front edge of the bench
+				_lineup.append_array([cup, b])
+			cam.fov = 50.0
+			cam.global_position = Vector3(-0.55, station._bench_y + 0.4, -2.85)
+			cam.look_at(Vector3(-0.55, station._bench_y + 0.13, -2.0))
+		elif view in ["soup", "chacha", "pulut"]:   # finished soups (the bobo chacha cold, with ice cubes)
+			for n in _lineup:
+				n.queue_free()
+			_lineup.clear()
 			_set_view("making")
-			station.begin("tau_suan")
+			station.begin({"soup": "tau_suan", "chacha": "bobo_chacha", "pulut": "pulut_hitam"}[view], view == "chacha")
+			station.debug_stage()
+		elif view == "two":     # 2-dessert order: the ice kachang waits on the tray, tau suan done
+			var r := RecipeBook.recipe("ice_kachang")
+			var first := {"vessel": "glass", "base": r.base, "fill": 1.0, "toppings": r.toppings,
+				"sauces": r.sauces, "fixes": 0}
+			station.begin("", false, [{"item": "ice_kachang", "cold": false}, {"item": "tau_suan", "cold": false}] as Array[Dictionary],
+				{"ice_kachang": {"res": {}, "bowl": first}})
 			station.debug_stage()
 		elif view == "summary":
 			_set_view("waiting")
-			Game.last_day = {"day": 3, "served": 9, "gave_up": 1, "earned": 2280}
+			Game.last_day = {"day": 3, "served": 9, "gave_up": 1, "earned": 2280, "desserts": 11}
 			Game.money = 2550
 			_show_summary()
 		elif view == "shop":

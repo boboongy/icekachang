@@ -2,13 +2,23 @@
   "_note": "Single source of truth for menu items. Read by tools/blender/build_stall.py (lightbox art) and by the game. Prices in cents. unlock_cost = shop price to add the item to the menu (cents). color = the dessert's icon colour in customer order bubbles (0-255 RGB).",
   "items": [
     {"id": "ice_kachang",        "no": 1, "name": "Ice Kachang",          "price": 250, "kind": "ice",  "v1": true,  "start_unlocked": true,  "color": [236, 72, 116]},
-    {"id": "ice_kachang_mango",  "no": 2, "name": "Mango Ice Kachang",    "price": 280, "kind": "ice",  "v1": false, "start_unlocked": false, "color": [255, 150, 60]},
-    {"id": "ice_kachang_durian", "no": 3, "name": "Durian Ice Kachang",   "price": 280, "kind": "ice",  "v1": false, "start_unlocked": false, "color": [240, 214, 108]},
+    {"id": "ice_kachang_mango",  "no": 2, "name": "Mango Ice Kachang",    "price": 280, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 3000, "color": [255, 150, 60]},
+    {"id": "ice_kachang_durian", "no": 3, "name": "Durian Ice Kachang",   "price": 280, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 4500, "color": [240, 214, 108]},
     {"id": "mango_milk_ice",     "no": 4, "name": "Mango Milk Ice",       "price": 280, "kind": "ice",  "v1": true,  "start_unlocked": true,  "color": [255, 172, 32]},
     {"id": "chendol",            "no": 5, "name": "Chendol",              "price": 200, "kind": "ice",  "v1": true,  "start_unlocked": false, "unlock_cost": 1500, "color": [72, 194, 82]},
-    {"id": "chendol_durian",     "no": 6, "name": "Durian Chendol",       "price": 280, "kind": "ice",  "v1": false, "start_unlocked": false, "color": [160, 200, 90]},
-    {"id": "tau_suan",           "no": 7, "name": "Tau Suan",             "price": 150, "kind": "soup", "v1": true,  "start_unlocked": false, "unlock_cost": 2500, "color": [232, 210, 120]},
-    {"id": "bobo_chacha",        "no": 8, "name": "Bobo Chacha",          "price": 180, "kind": "soup", "v1": false, "start_unlocked": false, "color": [200, 170, 220]},
-    {"id": "pulut_hitam",        "no": 9, "name": "Pulut Hitam",          "price": 180, "kind": "soup", "v1": false, "start_unlocked": false, "color": [90, 40, 70]}
+    {"id": "chendol_durian",     "no": 6, "name": "Durian Chendol",       "price": 280, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 4000, "color": [160, 200, 90]},
+    {"id": "tau_suan",           "no": 13, "name": "Tau Suan",             "price": 150, "kind": "soup", "v1": true,  "start_unlocked": false, "unlock_cost": 2500, "color": [232, 210, 120]},
+    {"id": "bobo_chacha",        "no": 18, "name": "Bobo Chacha",          "price": 180, "kind": "soup", "v1": false, "start_unlocked": false, "unlock_cost": 6000, "color": [200, 170, 220]},
+    {"id": "pulut_hitam",        "no": 19, "name": "Pulut Hitam",          "price": 180, "kind": "soup", "v1": false, "start_unlocked": false, "unlock_cost": 7500, "color": [90, 40, 70]},
+    {"id": "ice_lychee",         "no": 7,  "name": "Ice Lychee",           "price": 220, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 2000, "color": [236, 130, 150]},
+    {"id": "ice_longan",         "no": 8,  "name": "Ice Longan",           "price": 220, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 2500, "color": [176, 120, 60]},
+    {"id": "ice_sea_coconut",    "no": 9,  "name": "Ice Sea Coconut",      "price": 250, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 3500, "color": [150, 206, 216]},
+    {"id": "ice_soursop",        "no": 10, "name": "Ice Soursop",          "price": 250, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 4500, "color": [170, 214, 130]},
+    {"id": "red_ruby_ice",       "no": 11, "name": "Red Ruby Ice",         "price": 250, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 4000, "color": [200, 20, 50]},
+    {"id": "ice_jelly_cocktail", "no": 12, "name": "Ice Jelly Cocktail",   "price": 250, "kind": "ice",  "v1": false, "start_unlocked": false, "unlock_cost": 5000, "color": [60, 160, 230]},
+    {"id": "green_bean_soup",    "no": 14, "name": "Green Bean Soup",      "price": 150, "kind": "soup", "v1": false, "start_unlocked": true,  "color": [130, 160, 70]},
+    {"id": "red_bean_soup",      "no": 15, "name": "Red Bean Soup",        "price": 150, "kind": "soup", "v1": false, "start_unlocked": false, "unlock_cost": 1000, "color": [150, 40, 50]},
+    {"id": "sweet_potato_soup",  "no": 16, "name": "Sweet Potato Soup",    "price": 150, "kind": "soup", "v1": false, "start_unlocked": false, "unlock_cost": 1500, "color": [240, 140, 40]},
+    {"id": "cheng_tng",          "no": 17, "name": "Cheng Tng",            "price": 200, "kind": "soup", "v1": false, "start_unlocked": false, "unlock_cost": 6000, "color": [210, 170, 110]}
   ]
 }

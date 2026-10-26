@@ -6,6 +6,8 @@ class_name RetroMaterials
 const ATLAS := preload("res://assets/textures/atlas.png")
 const FLOOR := preload("res://assets/textures/floor.png")
 const WALLTILE := preload("res://assets/textures/walltile.png")
+const PEOPLE := preload("res://assets/textures/people.png")
+const MENU := preload("res://assets/textures/menu.png")
 
 static var _cache := {}
 
@@ -24,6 +26,13 @@ static func get_material(mat_name: String) -> Material:
 			m.albedo_texture = ATLAS
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			m.disable_receive_shadows = true
+		"menu":     # our lightbox: its own texture; Stall darkens the tiles not on the menu yet
+			m.albedo_texture = MENU
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m.disable_receive_shadows = true
+		"people":   # customers: their own painted texture (tools/blender/build_stall.py paint_people)
+			m.albedo_texture = PEOPLE
+			m.metallic_specular = 0.0   # matte, painted look; specular bleached the faces in the sun
 		"floor":
 			m.albedo_texture = FLOOR
 			m.metallic_specular = 0.3
@@ -37,7 +46,7 @@ static func get_material(mat_name: String) -> Material:
 			m.roughness = 0.2
 			m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		"bowlglass":   # dessert glass bowls: tinted, see-through, bright edges
-			m.albedo_color = Color(0.45, 0.85, 0.9, 0.6)
+			m.albedo_color = Color(0.62, 0.88, 0.9, 0.55)
 			m.emission_enabled = true   # stays clearly teal in the dim making light
 			m.emission = Color(0.12, 0.3, 0.32)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

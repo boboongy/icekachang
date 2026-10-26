@@ -10,6 +10,8 @@ const PAPER := Color(0.99, 0.97, 0.9)
 const PINK := Color(0.89, 0.25, 0.44)
 const INK := Color(0.16, 0.14, 0.16)
 const GLASS := Color(0.72, 0.88, 0.92)
+const FROST := Color(0.3, 0.62, 0.95)  ## snowflake on a cold order
+const DONE := Color(0.18, 0.6, 0.3)    ## tick on a dessert already made (2-dessert order)
 const FS := 8                      ## font size (480x270 viewport)
 const LINE_H := 10.0
 const POPUP_SECS := 1.4
@@ -61,8 +63,8 @@ func hit_front(pos: Vector2) -> Customer:
 
 ## Screen rect round a customer's body, a bit wider than they are.
 func _body_rect(c: Customer) -> Rect2:
-	var top := cam.unproject_position(c.bubble_anchor())
-	var foot := cam.unproject_position(c.feet())
+	var top := UiKit.to_ui(cam.unproject_position(c.bubble_anchor()))
+	var foot := UiKit.to_ui(cam.unproject_position(c.feet()))
 	var half := absf(foot.y - top.y) * 0.22 + 6.0
 	return Rect2(Vector2(foot.x - half, top.y), Vector2(half * 2.0, foot.y - top.y))
 
@@ -89,38 +91,67 @@ func _draw() -> void:
 	for p in _popups:
 		if p.age < 0.0:
 			continue
-		var s := cam.unproject_position(p.at) - Vector2(0, 14 + p.age * 16.0)
+		var s := UiKit.to_ui(cam.unproject_position(p.at)) - Vector2(0, 14 + p.age * 16.0)
 		var a := clampf((POPUP_SECS - p.age) / 0.4, 0.0, 1.0)
 		_text_outlined(s - Vector2(_w(p.text) / 2.0, 0), p.text, Color(p.color, a))
 	_money()
 	_draw_banner()
 
 
-## Front customer: their line, then the dessert icon and name, then the patience bar.
+## Front customer: their line, then a row per dessert (icon, a snowflake if cold, name, and a
+## tick once made, for a 2-dessert order), then the patience bar.
 func _order_bubble(c: Customer) -> void:
 	if c.is_saying():
 		return
 	var r := _order_rect(c)
 	_bubble(r, c)
 	_text(r.position + Vector2(4, 3), c.order_line, INK)
-	_icon(r.position + Vector2(8, 4 + LINE_H + 4), c.item_id)
-	_text(r.position + Vector2(17, 3 + LINE_H), RecipeBook.item_name(c.item_id), PINK)
+	var two := c.item2 != ""
+	var y := LINE_H
+	for o in c.orders():
+		var x := 0.0
+		if two:
+			_tick(r.position + Vector2(4, y + 3), c.made.has(o.item))
+			x = 9.0
+		_icon(r.position + Vector2(8 + x, y + 8), o.item)
+		if o.cold:
+			_snowflake(r.position + Vector2(17 + x, y + 8))
+		_text(r.position + Vector2(17 + x + (8 if o.cold else 0), y + 3), RecipeBook.order_name(o.item, o.cold), PINK)
+		y += LINE_H
 	_patience(Rect2(r.position + Vector2(4, r.size.y - 5), Vector2(r.size.x - 8, 2)), c.patience)
 
 
 func _order_rect(c: Customer) -> Rect2:
-	var w := maxf(_w(c.order_line), _w(RecipeBook.item_name(c.item_id)) + 13.0) + 8.0
-	return _bubble_rect(c, Vector2(w, LINE_H * 2.0 + 10.0))
+	var w := _w(c.order_line)
+	for o in c.orders():
+		w = maxf(w, _w(RecipeBook.order_name(o.item, o.cold)) + (21.0 if o.cold else 13.0) + (9.0 if c.item2 != "" else 0.0))
+	return _bubble_rect(c, Vector2(w + 8.0, LINE_H * (1.0 + c.orders().size()) + 10.0))
 
 
-## Waiting further back: just the dessert icon and patience.
+## Waiting further back: just the dessert icon(s) and patience.
 func _small_bubble(c: Customer) -> void:
 	if c.is_saying():
 		return
-	var r := _bubble_rect(c, Vector2(18, 15))
+	var w := 4.0
+	for o in c.orders():
+		w += 10.0 + (8.0 if o.cold else 0.0)
+	var r := _bubble_rect(c, Vector2(w + 4.0, 15))
 	_bubble(r, c)
-	_icon(r.position + Vector2(9, 5), c.item_id)
+	var x := r.position.x + 9.0
+	for o in c.orders():
+		_icon(Vector2(x, r.position.y + 5), o.item)
+		x += 10.0
+		if o.cold:
+			_snowflake(Vector2(x - 1.0, r.position.y + 5))
+			x += 8.0
 	_patience(Rect2(r.position + Vector2(3, r.size.y - 4), Vector2(r.size.x - 6, 2)), c.patience)
+
+
+## 7x7 box at `top_left`, ticked when `done`.
+func _tick(top_left: Vector2, done: bool) -> void:
+	draw_rect(Rect2(top_left, Vector2(7, 7)), Color(0.7, 0.66, 0.6), false, 1.0)
+	if done:
+		draw_polyline(PackedVector2Array([top_left + Vector2(1, 3), top_left + Vector2(3, 6), top_left + Vector2(8, -1)]), DONE, 2.0)
 
 
 func _say_bubble(c: Customer) -> void:
@@ -131,14 +162,14 @@ func _say_bubble(c: Customer) -> void:
 
 ## Bubble of `sz` centred above the customer's head, kept on screen.
 func _bubble_rect(c: Customer, sz: Vector2) -> Rect2:
-	var a := cam.unproject_position(c.bubble_anchor())
+	var a := UiKit.to_ui(cam.unproject_position(c.bubble_anchor()))
 	var p := Vector2(a.x - sz.x / 2.0, a.y - sz.y - 5.0)
 	p = p.clamp(Vector2(2, 14), size - sz - Vector2(2, 2))
 	return Rect2(p.round(), sz)
 
 
 func _bubble(r: Rect2, c: Customer) -> void:
-	var a := cam.unproject_position(c.bubble_anchor())
+	var a := UiKit.to_ui(cam.unproject_position(c.bubble_anchor()))
 	var tx := clampf(a.x, r.position.x + 4, r.end.x - 4)
 	var tail := PackedVector2Array([Vector2(tx - 3, r.end.y - 1), Vector2(tx + 3, r.end.y - 1), Vector2(tx, r.end.y + 4)])
 	draw_rect(r.grow(1), INK)
@@ -152,6 +183,15 @@ func _icon(c: Vector2, item_id: String) -> void:
 	draw_circle(c + Vector2(0, 1), 3.5, RecipeBook.item_color(item_id))
 	draw_rect(Rect2(c + Vector2(-4.5, 1), Vector2(9, 3)), GLASS)
 	draw_rect(Rect2(c + Vector2(-1.5, 4), Vector2(3, 1)), GLASS)
+
+
+## Small light-blue snowflake (7x7 px) centred at `c`.
+func _snowflake(c: Vector2) -> void:
+	c = c.round()
+	draw_rect(Rect2(c + Vector2(-3, 0), Vector2(7, 1)), FROST)
+	draw_rect(Rect2(c + Vector2(0, -3), Vector2(1, 7)), FROST)
+	for d in [Vector2(-2, -2), Vector2(2, -2), Vector2(-2, 2), Vector2(2, 2)]:
+		draw_rect(Rect2(c + d, Vector2.ONE), FROST)
 
 
 func _patience(r: Rect2, v: float) -> void:

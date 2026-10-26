@@ -2,9 +2,17 @@ class_name MakingStation
 extends Node3D
 ## First-person making at the work bench. Ice: take a glass bowl, load an ice block, hold the
 ## shaver, add toppings from the tubs, pour sauces. Soup: take a white soup bowl (it goes in
-## front of the pot), ladle soup in (tap the pot or drag the ladle), add the side (you tiao).
+## front of the pot), ladle soup in from the right pot (tap it, or drag the ladle to the bowl),
+## add the side or toppings. Tau suan has the round pot; the other soups the six warmer wells.
 ## Then drag the bowl onto the tray (serve) or into the red pail (bin, free). Tap and drag both
-## work; mouse arrives as emulated touch, so one code path serves PC and phone.
+## work; mouse arrives as emulated touch, so one code path serves PC and phone. Grabbing a
+## topping that belongs drags the whole bowl; only a wrong one lifts out. Holding anything for
+## HOLD_SECS only shows its name, and a tap on an order-card row points at that ingredient.
+## Cold bobo chacha: the soup bowl goes under the shaver while it is held (before or after the
+## soup) for a little shaved ice; it slides back to its spot on release.
+## A 2-dessert order is made one after the other, in either order: the order card follows the
+## bowl (or a tap on its "then" row), the first finished one waits on the tray (kept in the
+## customer's `made`, so BACK keeps it), and serving the second hands both over together.
 ##
 ## Spots come from mk_* markers and named objects in assets/models/stall.glb
 ## (tools/blender/build_stall.py). Picking is ray-vs-sphere against those spots, no physics.
@@ -13,21 +21,28 @@ signal finished(item_id: String, result: Dictionary)   ## served; result from Re
 signal cancelled                                       ## back button
 
 const DRAG_START_PX := 5.0
+const HOLD_SECS := 0.5           # held this long without moving: show the name, add nothing
 const SHAVE_SECS := 1.6          # holding the shaver this long fills the bowl
+const FAST_SHAVE_SECS := 0.9     # with the fast shaver (shop upgrade)
 const CARRY_H := 0.2             # carried things float this high over the bench
 const POUR_TILT := deg_to_rad(115.0)
 const MILK_BLOCK := Color8(252, 238, 206)
 const LADLE_FILL := 0.34         # one ladle of soup; three fill the bowl
+const BIG_LADLE_FILL := 0.5      # with the big ladle (shop upgrade): two fill it
 const LADLE_TILT := deg_to_rad(80.0)
-const POT_SOUP := "tau_suan_soup"   # the one soup on the burner (more pots come with M10)
+const HOME_POT := "tau_suan_soup"   # the ladle rests in this pot
+const TRAY_SIDE := Vector3(0.12, 0, 0)   # 2-dessert order: the first waits at tray - this, the second goes to tray + this
 
 var active := false
 var item_id := ""
+var cold := false                ## cold bobo chacha: the order needs a little shaved ice too
 var bowl: Bowl
 var ui: MakingUI
 var has_bowl := false
 var block_kind := "ice"          # ice block in the shaver: "ice" or "milk_ice"
 var next_step := {}              # see _step(); refreshed after every move
+var orders: Array[Dictionary] = []   ## [{item, cold}]; two for a 2-dessert order
+var made := {}                   ## 2-dessert order: item -> {res, bowl state} already on the tray
 
 var _cam: Camera3D
 var _bench_y := 0.93
@@ -40,14 +55,17 @@ var _block: MeshInstance3D
 var _milk_mat: StandardMaterial3D
 var _ladle: Node3D
 var _ladle_home: Transform3D
-var _steam: CPUParticles3D
+var _steam: Array[CPUParticles3D] = []   # round pot, warmer
 var _snow: CPUParticles3D
 var _stream: MeshInstance3D
 var _ghost: MeshInstance3D       # scoop of topping being carried
+var _drops: CPUParticles3D       # syrup splash when a fruit goes in
 var _shaving := false
 var _busy := false               # an animation owns the station (pour, serve, bin)
-var _press := {}                 # {pos, hit, dragging, carry}
+var _finger := -1                # touch index working the station, -1 = none down
+var _press := {}                 # {pos, hit, dragging, carry, at (secs), held}
 var _done := false               # served; waiting to hand back to the stall
+var _tray_bowl: Bowl             # the first of a 2-dessert order, waiting on the tray
 
 
 func setup(model: Node3D, cam: Camera3D, overlay: MakingUI) -> void:
@@ -80,21 +98,16 @@ func setup(model: Node3D, cam: Camera3D, overlay: MakingUI) -> void:
 		model.find_child("soup_bowl", true, false) as MeshInstance3D)
 	add_child(bowl)
 	bowl.visible = false
+	var cups: Array[MeshInstance3D] = []
+	for m in [bowl._glass, bowl._soup]:
+		var cup := (m as MeshInstance3D).duplicate() as MeshInstance3D
+		add_child(cup)
+		cups.append(cup)
+	_tray_bowl = Bowl.new(cups[0], cups[1])
+	add_child(_tray_bowl)
+	_tray_bowl.visible = false
 
-	# a few wisps of steam over the warm pot, only while making
-	_steam = CPUParticles3D.new()
-	_steam.emitting = false
-	_steam.amount = 10
-	_steam.lifetime = 1.4
-	_steam.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	_steam.emission_sphere_radius = 0.08
-	_steam.direction = Vector3.UP
-	_steam.spread = 12.0
-	_steam.gravity = Vector3.ZERO
-	_steam.initial_velocity_min = 0.06
-	_steam.initial_velocity_max = 0.12
-	_steam.scale_amount_min = 0.6
-	_steam.scale_amount_max = 1.2
+	# a few wisps of steam over each warm pot, only while making
 	var wisp := BoxMesh.new()
 	wisp.size = Vector3.ONE * 0.016
 	var steam_mat := StandardMaterial3D.new()
@@ -102,9 +115,29 @@ func setup(model: Node3D, cam: Camera3D, overlay: MakingUI) -> void:
 	steam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	steam_mat.albedo_color = Color(1, 1, 1, 0.3)
 	wisp.material = steam_mat
-	_steam.mesh = wisp
-	_steam.position = _spot.pot + Vector3(0, 0.03, 0)
-	add_child(_steam)
+	# one cloud over the round pot, one over the whole warmer (one per well cost a draw call each)
+	var wells := Vector3.ZERO
+	for soup in pots():
+		if soup != HOME_POT:
+			wells += _spot["pot_" + soup] / (pots().size() - 1)
+	for big in [true, false]:
+		var steam := CPUParticles3D.new()
+		steam.emitting = false
+		steam.amount = 10 if big else 14
+		steam.lifetime = 1.4
+		steam.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		steam.emission_box_extents = Vector3(0.06, 0.02, 0.06) if big else Vector3(0.16, 0.02, 0.09)
+		steam.direction = Vector3.UP
+		steam.spread = 12.0
+		steam.gravity = Vector3.ZERO
+		steam.initial_velocity_min = 0.06
+		steam.initial_velocity_max = 0.12
+		steam.scale_amount_min = 0.6
+		steam.scale_amount_max = 1.2
+		steam.mesh = wisp
+		steam.position = (_spot["pot_" + HOME_POT] if big else wells) + Vector3(0, 0.03, 0)
+		add_child(steam)
+		_steam.append(steam)
 
 	_snow = CPUParticles3D.new()
 	_snow.emitting = false
@@ -139,19 +172,85 @@ func setup(model: Node3D, cam: Camera3D, overlay: MakingUI) -> void:
 	_ghost.visible = false
 	add_child(_ghost)
 
+	_drops = CPUParticles3D.new()
+	_drops.emitting = false
+	_drops.one_shot = true
+	_drops.explosiveness = 0.9
+	_drops.amount = 10
+	_drops.lifetime = 0.45
+	_drops.direction = Vector3.UP
+	_drops.spread = 40.0
+	_drops.initial_velocity_min = 0.5
+	_drops.initial_velocity_max = 0.8
+	_drops.gravity = Vector3(0, -4, 0)
+	var drop := BoxMesh.new()
+	drop.size = Vector3.ONE * 0.009
+	var drop_mat := StandardMaterial3D.new()
+	drop_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	drop.material = drop_mat
+	_drops.mesh = drop
+	add_child(_drops)
 
-func begin(order_item: String) -> void:
-	item_id = order_item
+
+## `two`: both desserts of a 2-dessert order ([{item, cold}], `order_item` is ignored) and
+## `made_so_far` the customer's record of the one already on the tray (filled in here).
+func begin(order_item: String, cold_order := false, two: Array[Dictionary] = [], made_so_far := {}) -> void:
+	orders.assign(two if two.size() == 2 else [{"item": order_item, "cold": cold_order}])
+	made = made_so_far
+	_tray_bowl.visible = false
+	for o in orders:
+		if made.has(o.item):
+			_tray_bowl.load_state(made[o.item].bowl)
+			_tray_bowl.global_position = _spot.tray - TRAY_SIDE
+			_tray_bowl.visible = true
+	for o in orders:
+		if not made.has(o.item):
+			_set_current(o)
+			break
+	var k := 1.35 if Game.has_upgrade("big_ladle") else 1.0
+	_ladle_home.basis = _ladle_home.basis.orthonormalized().scaled(Vector3.ONE * k)
+	_ladle.global_transform = _ladle_home
 	active = true
 	_done = false
 	_busy = false
 	has_bowl = false
 	bowl.clear()
 	bowl.visible = false
-	_steam.emitting = true
+	for steam in _steam:
+		steam.emitting = true
 	ui.set_making(true)
-	ui.set_order(item_id)
+	ui.set_order(item_id, cold, _also())
 	_refresh()
+
+
+## Makes `o` ({item, cold}) the dessert the card, hints and judging follow.
+func _set_current(o: Dictionary) -> void:
+	item_id = o.item
+	cold = o.cold and RecipeBook.has_cold(o.item)
+	if active:
+		ui.set_order(item_id, cold, _also())
+
+
+## The other dessert of a 2-dessert order for the card: {item, cold, done}; {} for one dessert.
+func _also() -> Dictionary:
+	for o in orders:
+		if o.item != item_id:
+			return {"item": o.item, "cold": o.cold, "done": made.has(o.item)}
+	return {}
+
+
+## The other dessert, if there is one still to make.
+func _other_open() -> Dictionary:
+	var a := _also()
+	return a if not a.is_empty() and not a.done else {}
+
+
+## Could the bowl as it is still become `o`? Right vessel, no other base, nothing it doesn't have.
+func _fits(o: Dictionary, st: Dictionary) -> bool:
+	var r := RecipeBook.recipe(o.item, o.cold)
+	if st.vessel != RecipeBook.vessel(o.item) or (st.base != "" and st.base != r.base):
+		return false
+	return st.toppings.all(func(t): return t in r.toppings) and st.sauces.all(func(s): return s in r.sauces)
 
 
 func end() -> void:
@@ -162,10 +261,12 @@ func end() -> void:
 	_stream.visible = false
 	has_bowl = false
 	bowl.visible = false
+	_tray_bowl.visible = false
 	for id in _sauce:
 		_sauce[id].global_transform = _sauce_home[id]
 	_ladle.global_transform = _ladle_home
-	_steam.emitting = false
+	for steam in _steam:
+		steam.emitting = false
 	ui.set_making(false)
 
 
@@ -178,19 +279,31 @@ func debug_stage() -> void:
 	if RecipeBook.vessel(item_id) == "soup":
 		bowl.set_vessel("soup")
 		bowl.global_position = _spot.soup_spot
-		bowl.base = RecipeBook.recipe(item_id).base
-		bowl.toppings.assign(RecipeBook.recipe(item_id).toppings)
+		var r := RecipeBook.recipe(item_id, cold)
+		bowl.base = r.base
+		bowl.ice = 0.25 if r.has("ice") else 0.0
+		bowl.toppings.assign(r.toppings)
+		bowl.sauces.assign(r.sauces)
 	else:
 		bowl.set_vessel("glass")
 		bowl.global_position = _spot.bowl_spot
 		bowl.base = "ice"
 		bowl.toppings.assign(["red_bean", "corn", "attap"])
-		bowl.sauces.assign(["rose"])
+		bowl.sauces.assign(["rose", "green_syrup"])
 	bowl.rebuild()
 	_refresh()
 
 
 # --- picking -----------------------------------------------------------------------------
+
+## Soup bases, each ladled from its own pot (target "pot:<base id>").
+func pots() -> Array[String]:
+	var out: Array[String] = []
+	for id in RecipeBook.of_kind("base"):
+		if RecipeBook.ingredient(id).vessel == "soup":
+			out.append(id)
+	return out
+
 
 ## Everything touchable right now: name -> [world position, radius].
 func targets() -> Dictionary:
@@ -202,9 +315,10 @@ func targets() -> Dictionary:
 		"bin": [_spot.bin, 0.12],
 		"tray": [_spot.tray, 0.18],
 		"soup_stack": [_spot.soup_stack, 0.1],
-		"pot": [_spot.pot, 0.15],
 	}
-	for id in RecipeBook.of_kind("topping") + RecipeBook.of_kind("side"):
+	for soup in pots():
+		t["pot:" + soup] = [_spot["pot_" + soup], 0.15 if soup == HOME_POT else 0.065]
+	for id in RecipeBook.of_kind("topping") + RecipeBook.of_kind("side") + RecipeBook.of_kind("fruit"):
 		t["tub:" + id] = [_spot["tub_" + id], 0.07]
 	for id in _sauce:
 		var s: MeshInstance3D = _sauce[id]
@@ -251,10 +365,13 @@ func _label(target: String) -> String:
 	match target.get_slice(":", 0):
 		"bowl_stack": return "Glass bowls"
 		"soup_stack": return "Soup bowls"
-		"pot": return "Tau suan pot: tap to ladle"
+		"pot": return RecipeBook.ingredient(id).pot + ": tap to ladle"
 		"shaver": return "Ice shaver: press and hold"
 		"ice": return RecipeBook.ingredient_name(id) + " block"
-		"tub", "sauce": return RecipeBook.ingredient_name(id)
+		"tub", "sauce":
+			if RecipeBook.ingredient(id).kind == "fruit":
+				return RecipeBook.ingredient_name(id) + " + syrup"
+			return RecipeBook.ingredient_name(id)
 		"cluster": return RecipeBook.ingredient_name(bowl.toppings[int(id)])
 		"bin": return "Scrap pail"
 		"tray": return "Serving tray"
@@ -262,18 +379,29 @@ func _label(target: String) -> String:
 	return ""
 
 
+## Just the name, for a hold ("Ice shaver", not "Ice shaver: press and hold").
+func _name_of(target: String) -> String:
+	return _label(target).get_slice(":", 0)
+
+
 # --- input ---------------------------------------------------------------------------------
 
+## One finger works the station: the first one down. Not index 0: iOS Safari gives every touch
+## a new large id, so its first finger is never 0.
 func _unhandled_input(event: InputEvent) -> void:
+	var lifted: bool = event is InputEventScreenTouch and not event.pressed and event.index == _finger
+	if lifted:
+		_finger = -1          # also when inactive, so a lost lift never locks the station
 	if not active or _done:
 		return
-	if event is InputEventScreenTouch and event.index == 0:
-		if event.pressed:
-			_on_press(event.position)
-		else:
-			_on_release(event.position)
+	if event is InputEventScreenTouch and event.pressed and _finger == -1:
+		_finger = event.index
+		_on_press(event.position)
 		get_viewport().set_input_as_handled()
-	elif event is InputEventScreenDrag and event.index == 0:
+	elif lifted:
+		_on_release(event.position)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventScreenDrag and event.index == _finger:
 		_on_move(event.position)
 		get_viewport().set_input_as_handled()
 
@@ -281,8 +409,20 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_press(pos: Vector2) -> void:
 	if _busy:
 		return
+	if ui.hit_also(UiKit.to_ui(pos)):
+		_set_current(_other_open())
+		Sound.play("click")
+		ui.flash_hint("Making the %s now" % RecipeBook.order_name(item_id, cold).to_lower())
+		_refresh()
+		return
+	var row := ui.hit_row(UiKit.to_ui(pos))
+	if row != "":
+		var target := ingredient_target(row)
+		ui.point_at(UiKit.to_ui(screen_pos(target)), RecipeBook.ingredient_name(row))
+		Sound.play("click")
+		return
 	var hit := pick(pos)
-	_press = {"pos": pos, "hit": hit, "dragging": false, "carry": ""}
+	_press = {"pos": pos, "hit": hit, "dragging": false, "carry": "", "at": _now(), "held": false}
 	if hit != "":
 		ui.show_tag(_label(hit), pos)
 	if hit == "shaver":
@@ -307,10 +447,35 @@ func _on_release(pos: Vector2) -> void:
 		_stop_shave()
 	elif _press.dragging:
 		_end_drag(pos)
-	elif _press.hit != "":
+	elif _press.hit != "" and not _press.held:
 		_tap(_press.hit)
 	_press = {}
 	_refresh()
+
+
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
+## Where an ingredient sits on the bench (a targets() name): its tub, jar, plate, bottle, pot
+## or ice block (the shaver for the ice in a cold soup).
+func ingredient_target(id: String) -> String:
+	var info := RecipeBook.ingredient(id)
+	match info.kind:
+		"base":
+			if info.vessel == "soup":
+				return "pot:" + id
+			return "shaver" if RecipeBook.vessel(item_id) == "soup" else "ice:" + id
+		"sauce": return "sauce:" + id
+	return "tub:" + id
+
+
+## Does topping `id` belong in the dessert being made (or the other one still to make)?
+func _belongs(id: String) -> bool:
+	if id in RecipeBook.recipe(item_id, cold).toppings:
+		return true
+	var other := _other_open()
+	return not other.is_empty() and id in RecipeBook.recipe(other.item, other.cold).toppings
 
 
 func _tap(hit: String) -> void:
@@ -318,12 +483,16 @@ func _tap(hit: String) -> void:
 	match hit.get_slice(":", 0):
 		"bowl_stack": _take_bowl("glass")
 		"soup_stack": _take_bowl("soup")
-		"pot": _ladle_soup()
+		"pot": _ladle_soup(id)
 		"ice": _load_block(id)
 		"tub": _add_topping(id, _spot["tub_" + id] + Vector3(0, 0.03, 0))
 		"sauce": _pour(id)
 		"bowl": ui.flash_hint("Drag the bowl onto the pink tray to serve")
-		"cluster": ui.flash_hint("Drag it out of the bowl to take it back")
+		"cluster":
+			if _belongs(bowl.toppings[int(id)]):
+				ui.flash_hint("Drag the bowl onto the pink tray to serve")
+			else:
+				ui.flash_hint("Drag it out of the bowl to take it back")
 		"bin": ui.flash_hint("Drag a bowl here to throw it away")
 		"tray": ui.flash_hint("Drag your bowl here to serve")
 
@@ -333,12 +502,15 @@ func _tap(hit: String) -> void:
 func _begin_drag(hit: String) -> void:
 	var kind := hit.get_slice(":", 0)
 	var id := hit.get_slice(":", 1)
+	if kind == "cluster" and _belongs(bowl.toppings[int(id)]):
+		kind = "bowl"            # a topping that belongs: grabbing it moves the whole bowl
+		id = ""
 	match kind:
 		"bowl_stack", "soup_stack":
 			_take_bowl("glass" if kind == "bowl_stack" else "soup")   # a flick works like a tap
 			return
 		"pot":
-			if not _ladle_ok():
+			if not _ladle_ok(id):
 				_press.hit = ""   # said why once; ignore the rest of this drag
 				return
 		"tub":
@@ -414,7 +586,7 @@ func _end_drag(pos: Vector2) -> void:
 				_sauce_back(id)
 		"pot":
 			if over == "bowl":
-				_ladle_soup()
+				_ladle_soup(id)
 			else:
 				_ladle_back()
 		"bowl":
@@ -485,8 +657,19 @@ func _load_block(kind: String) -> void:
 func _start_shave() -> void:
 	if not has_bowl:
 		ui.flash_hint("Put a bowl under the shaver first")
-	elif bowl.vessel != "glass":
-		ui.flash_hint("Ice goes in a glass bowl. Bin the soup bowl first.")
+	elif bowl.vessel == "soup":
+		var other := _other_open()
+		var wants_ice := RecipeBook.recipe(item_id, cold).has("ice") 			or (not other.is_empty() and RecipeBook.recipe(other.item, other.cold).has("ice"))
+		if not wants_ice:
+			ui.flash_hint("No ice for this one. Only a cold chacha gets ice.")
+			return
+		if bowl.ice >= 1.0:
+			ui.flash_hint("That's way too much ice already!")
+			return
+		_shaving = true          # a little ice on a cold chacha: the bowl visits the shaver
+		_move_bowl(_spot.bowl_spot, 0.15)
+		_snow.emitting = true
+		Sound.shave(true)
 	elif bowl.base != "" and bowl.base != block_kind:
 		ui.flash_hint("This bowl has %s. Bin it to change the ice." % RecipeBook.ingredient_name(bowl.base).to_lower())
 	elif bowl.fill >= 1.0:
@@ -506,17 +689,32 @@ func _stop_shave() -> void:
 	Sound.shave(false)
 	for i in _shaver.size():
 		_shaver[i].position = _shaver_home[i]
+	if has_bowl and bowl.vessel == "soup":
+		_move_bowl(_spot.soup_spot, 0.2)
 	_refresh()
 
 
 func _process(delta: float) -> void:
+	if not _press.is_empty() and not _press.dragging and not _press.held and not _shaving 			and _press.hit not in ["", "shaver"] and _now() - _press.at >= HOLD_SECS:
+		_press.held = true       # only show what it is; letting go adds nothing
+		ui.show_tag(_name_of(_press.hit), _press.pos / UiKit.ui_scale, 2.0)
 	if not _shaving:
 		return
-	bowl.fill = minf(bowl.fill + delta / SHAVE_SECS, 1.0)
-	bowl.rebuild()
+	var secs := FAST_SHAVE_SECS if Game.has_upgrade("fast_shaver") else SHAVE_SECS
 	var jig := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * 0.003
 	for i in _shaver.size():
 		_shaver[i].position = _shaver_home[i] + jig
+	if bowl.vessel == "soup":
+		var was := bowl.ice
+		bowl.ice = minf(bowl.ice + delta / secs, 1.0)
+		bowl.rebuild()
+		if was < RecipeBook.TOO_MUCH_ICE and bowl.ice >= RecipeBook.TOO_MUCH_ICE:
+			ui.flash_hint("Whoa, that's a lot of ice! Just a little is enough")
+		if bowl.ice >= 1.0:
+			_stop_shave()
+		return
+	bowl.fill = minf(bowl.fill + delta / secs, 1.0)
+	bowl.rebuild()
 	if bowl.fill >= 1.0:
 		_stop_shave()
 		bowl.bounce()
@@ -554,9 +752,19 @@ func _add_topping(id: String, from: Vector3, put_back := false) -> bool:
 		bowl.rebuild()
 		bowl.bounce()
 		Sound.play("scoop")
+		if RecipeBook.ingredient(id).has("syrup"):
+			_splash(id, to)
 		_busy = false
 		_refresh())
 	return true
+
+
+## A fruit spoons in with its syrup: a few drops jump up and a pour sound.
+func _splash(id: String, at: Vector3) -> void:
+	(_drops.mesh.surface_get_material(0) as StandardMaterial3D).albedo_color = RecipeBook.color(id, "syrup").darkened(0.08)
+	_drops.global_position = at
+	_drops.restart()
+	Sound.play("pour", 1.5)
 
 
 func _pour(id: String) -> void:
@@ -600,13 +808,15 @@ func _sauce_back(id: String) -> void:
 	create_tween().tween_property(_sauce[id], "global_transform", _sauce_home[id], 0.2)
 
 
-## Can a ladle of soup go in now? Says why not.
-func _ladle_ok() -> bool:
+## Can a ladle of this soup go in now? Says why not.
+func _ladle_ok(soup: String) -> bool:
 	var why := ""
 	if not has_bowl:
 		why = "Take a white soup bowl first"
 	elif bowl.vessel != "soup":
 		why = "Soup goes in a white soup bowl"
+	elif bowl.base != "" and bowl.base != soup:
+		why = "This bowl has %s. Bin it to change the soup." % RecipeBook.ingredient_name(bowl.base).to_lower()
 	elif bowl.fill >= 1.0:
 		why = "The bowl is full!"
 	if why != "":
@@ -614,10 +824,10 @@ func _ladle_ok() -> bool:
 	return why == ""
 
 
-## One ladle of soup from the pot into the soup bowl. Works from the resting ladle (tap the
-## pot) or from wherever the player dragged it.
-func _ladle_soup() -> void:
-	if not _ladle_ok():
+## One ladle of soup from its pot into the soup bowl. Works from the resting ladle (tap the
+## pot; the ladle dips in that pot first) or from wherever the player dragged it.
+func _ladle_soup(soup: String) -> void:
+	if not _ladle_ok(soup):
 		_ladle_back()
 		return
 	_busy = true
@@ -626,14 +836,18 @@ func _ladle_soup() -> void:
 	var tip := Transform3D(Basis(Vector3.BACK, -LADLE_TILT) * _ladle_home.basis, top)
 	var tw := create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	if _ladle.global_transform.is_equal_approx(_ladle_home):
-		tw.tween_property(_ladle, "global_position", _ladle_home.origin + Vector3(0, -0.04, 0), 0.12)
-		tw.tween_property(_ladle, "global_position", _ladle_home.origin + Vector3(0, 0.1, 0), 0.14)
+		var dip := _ladle_home.origin
+		if soup != HOME_POT:     # over to the warmer well first
+			dip = _spot["pot_" + soup] + Vector3(0, -0.03, 0)
+			tw.tween_property(_ladle, "global_position", dip + Vector3(0, 0.08, 0), 0.16)
+		tw.tween_property(_ladle, "global_position", dip + Vector3(0, -0.04, 0), 0.12)
+		tw.tween_property(_ladle, "global_position", dip + Vector3(0, 0.1, 0), 0.14)
 	tw.tween_property(_ladle, "global_transform", over, 0.22)
 	tw.tween_property(_ladle, "global_transform", tip, 0.16)
 	tw.tween_callback(func():
-		bowl.base = POT_SOUP
+		bowl.base = soup
 		var surf := bowl.global_position + Vector3(0, bowl._surface_y(0.0), 0)
-		(_stream.material_override as StandardMaterial3D).albedo_color = RecipeBook.color(POT_SOUP)
+		(_stream.material_override as StandardMaterial3D).albedo_color = RecipeBook.color(soup)
 		(_stream.mesh as BoxMesh).size = Vector3(0.02, maxf(top.y - surf.y, 0.01), 0.02)
 		_stream.global_position = (top + surf) / 2
 		_stream.visible = true
@@ -641,7 +855,8 @@ func _ladle_soup() -> void:
 	var set_fill := func(f: float) -> void:
 		bowl.fill = f
 		bowl.rebuild()
-	tw.tween_method(set_fill, bowl.fill, minf(bowl.fill + LADLE_FILL, 1.0), 0.32)
+	var scoop := BIG_LADLE_FILL if Game.has_upgrade("big_ladle") else LADLE_FILL
+	tw.tween_method(set_fill, bowl.fill, minf(bowl.fill + scoop, 1.0), 0.32)
 	tw.tween_callback(func():
 		_stream.visible = false
 		bowl.bounce()
@@ -664,16 +879,56 @@ func _serve() -> void:
 		_move_bowl(_bowl_home(), 0.2)
 		return
 	_busy = true
+	var res := RecipeBook.judge(item_id, bowl.state(), cold)
+	var other := _other_open()
+	if not other.is_empty():
+		var res2 := RecipeBook.judge(other.item, bowl.state(), other.cold)
+		if _better(res2, res):           # made the other one after all: it counts as that one
+			_set_current(other)
+			res = res2
+		_first_to_tray(res)
+		return
 	_done = true
-	var res := RecipeBook.judge(item_id, bowl.state())
-	var tw := _move_bowl(_spot.tray, 0.25)
+	var note := ""
+	if orders.size() == 2:
+		var first: Dictionary = made[_also().item].res
+		note = "Both desserts served"
+		res = {"correct": first.correct and res.correct, "stars": roundi((first.stars + res.stars) / 2.0),
+			"missing": first.missing + res.missing, "extra": first.extra + res.extra, "parts": [first, res]}
+	var tw := _move_bowl(_spot.tray + (TRAY_SIDE if orders.size() == 2 else Vector3.ZERO), 0.25)
 	tw.tween_callback(func():
 		Sound.play("serve")
-		ui.show_result(res))
+		ui.show_result(res, note))
 	tw.tween_interval(2.2)
 	tw.tween_callback(func():
 		_busy = false
-		finished.emit(item_id, res))
+		finished.emit(orders[0].item, res))
+
+
+## Is judged result `a` better than `b`? Correct first, then stars.
+func _better(a: Dictionary, b: Dictionary) -> bool:
+	return (a.correct and not b.correct) or (a.correct == b.correct and a.stars > b.stars)
+
+
+## The first of a 2-dessert order is done: it waits on the tray, the card moves on to the other.
+func _first_to_tray(res: Dictionary) -> void:
+	made[item_id] = {"res": res, "bowl": bowl.state()}
+	var tw := _move_bowl(_spot.tray - TRAY_SIDE, 0.25)
+	tw.tween_callback(func():
+		Sound.play("serve")
+		ui.show_result(res, "1 of 2 on the tray. Now the next one!"))
+	tw.tween_interval(1.8)
+	tw.tween_callback(func():
+		_tray_bowl.load_state(made[item_id].bowl)
+		_tray_bowl.global_position = _spot.tray - TRAY_SIDE
+		_tray_bowl.visible = true
+		has_bowl = false
+		bowl.visible = false
+		bowl.clear()
+		_set_current(_other_open())
+		ui.hide_result()
+		_busy = false
+		_refresh())
 
 
 func _bin() -> void:
@@ -697,7 +952,10 @@ func _refresh() -> void:
 	if not active or _done:
 		return
 	var st := bowl.state()
-	ui.refresh(item_id, st)
+	var other := _other_open()
+	if has_bowl and not other.is_empty() and not _fits({"item": item_id, "cold": cold}, st) and _fits(other, st):
+		_set_current(other)              # the bowl is turning into the other dessert: follow it
+	ui.refresh(item_id, st, cold)
 	next_step = _next_step(st)
 	ui.set_hint(next_step.hint)
 
@@ -716,7 +974,7 @@ func _step(hint: String, target: String, to := "", hold := false) -> Dictionary:
 
 
 func _next_step(st: Dictionary) -> Dictionary:
-	var r := RecipeBook.recipe(item_id)
+	var r := RecipeBook.recipe(item_id, cold)
 	var nm := func(id: String) -> String: return RecipeBook.ingredient_name(id).to_lower()
 	var soup := RecipeBook.vessel(item_id) == "soup"
 	if not has_bowl:
@@ -727,15 +985,20 @@ func _next_step(st: Dictionary) -> Dictionary:
 		return _step("Wrong bowl! Drag it to the red pail", "bowl", "bin")
 	if not bowl.has_base():
 		if soup:
-			return _step("Tap the pot (or drag the ladle) to add soup", "pot")
+			return _step("Tap the %s (or drag the ladle) to add soup" % RecipeBook.ingredient(r.base).pot.to_lower(),
+				"pot:" + r.base)
 		if st.base == "" and block_kind != r.base:
 			return _step("Tap the %s block to load the shaver" % nm.call(r.base), "ice:" + r.base)
 		return _step("Press and hold the shaver to shave ice", "shaver", "", true)
 	if st.base != r.base:
-		return _step("Wrong ice! Drag the bowl to the red pail", "bowl", "bin")
+		return _step("Wrong %s! Drag the bowl to the red pail" % ("soup" if soup else "ice"), "bowl", "bin")
+	if r.has("ice") and st.ice <= 0.0:
+		return _step("Cold one: press the shaver briefly for a little ice", "shaver", "", true)
+	if soup and not r.has("ice") and st.ice > 0.0:
+		return _step("No ice in this one! Drag the bowl to the red pail", "bowl", "bin")
 	for t in r.toppings:
 		if not t in st.toppings:
-			var from := "the plate" if RecipeBook.ingredient(t).kind == "side" else "its tub"
+			var from: String = {"side": "the plate", "fruit": "its jar"}.get(RecipeBook.ingredient(t).kind, "its tub")
 			return _step("Add %s: tap or drag %s" % [nm.call(t), from], "tub:" + t)
 	for i in st.toppings.size():
 		var t: String = st.toppings[i]
@@ -749,6 +1012,6 @@ func _next_step(st: Dictionary) -> Dictionary:
 			return _step("Oops, extra %s. Bin it (red pail) or serve" % nm.call(s), "bowl", "bin")
 	if st.fill < RecipeBook.FULL_ICE:
 		if soup:
-			return _step("Ladle in more soup, or serve", "pot")
+			return _step("Ladle in more soup, or serve", "pot:" + r.base)
 		return _step("Hold the shaver for more ice, or serve", "shaver", "", true)
 	return _step("Drag the bowl onto the pink tray to serve", "bowl", "tray")

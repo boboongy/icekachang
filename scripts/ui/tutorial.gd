@@ -112,9 +112,9 @@ func _process(delta: float) -> void:
 			var p := st.pointer()
 			if not p.is_empty():
 				step = Step.SERVE if p.target == "bowl" and p.to == "tray" else Step.MAKE
-				pointer = {"at": st.screen_pos(p.target), "hold": p.hold}
+				pointer = {"at": UiKit.to_ui(st.screen_pos(p.target)), "hold": p.hold}
 				if p.to != "":
-					pointer.to = st.screen_pos(p.to)
+					pointer.to = UiKit.to_ui(st.screen_pos(p.to))
 			if step == Step.SERVE:
 				_say("3/3   All done! Drag the bowl onto the pink tray to serve it.")
 			else:

@@ -10,8 +10,22 @@ const SOFT := Color(0.45, 0.4, 0.42)
 const GREEN := Color(0.18, 0.6, 0.3)
 const BTN := Vector2(76, 24)        ## thumb-size at 480x270 on a phone
 
+## Screen pixels per UI pixel. The UI is laid out at 480x270 (font size 8 = one font pixel);
+## the making view renders at twice that (Stall.RES), so the UI layer is scaled up with it.
+static var ui_scale := 1.0
+
 const FONT := preload("res://assets/fonts/pixel.fnt")
 const OUTLINED := preload("res://assets/fonts/pixel_outline.fnt")   ## white text with a dark edge
+
+
+## Screen (viewport) position -> UI position, e.g. a 3D point from Camera3D.unproject_position.
+static func to_ui(p: Vector2) -> Vector2:
+	return p / ui_scale
+
+
+## UI position -> screen (viewport) position, e.g. for input events.
+static func to_screen(p: Vector2) -> Vector2:
+	return p * ui_scale
 
 
 static func label(col: Color, fs := 8, outlined := false) -> Label:

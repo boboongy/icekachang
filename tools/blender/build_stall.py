@@ -33,6 +33,7 @@ OUT_GLB = os.path.join(ROOT, "assets", "models", "stall.glb")
 MENU = json.load(open(os.path.join(ROOT, "data", "menu.json")))["items"]
 INGREDIENTS = json.load(open(os.path.join(ROOT, "data", "recipes.json")))["ingredients"]
 TOPPINGS = sorted((k for k, v in INGREDIENTS.items() if v["kind"] == "topping"), key=lambda k: INGREDIENTS[k]["slot"])
+FRUITS = sorted((k for k, v in INGREDIENTS.items() if v["kind"] == "fruit"), key=lambda k: INGREDIENTS[k]["slot"])
 SAUCES = sorted((k for k, v in INGREDIENTS.items() if v["kind"] == "sauce"), key=lambda k: INGREDIENTS[k]["slot"])
 
 FLOOR_TILE = 1.2   # metres covered by floor.png
@@ -87,8 +88,10 @@ class Canvas:
         region *= 1.0 + (r.random(region.shape[:2])[..., None] - 0.5) * amount
         np.clip(region, 0, 1, out=region)
 
-    def text(self, x, y, s, col, font="5x7", scale=1, shadow=None):
-        glyphs = FONT5 if font == "5x7" else FONT3
+    def text(self, x, y, s, col, font="5x7", scale=1, shadow=None, sy=None):
+        """sy = vertical scale when it differs from scale (glyphs stretched tall)."""
+        sy = scale if sy is None else sy
+        glyphs = FONTS[font]
         cx = x
         for ch in s:
             g = glyphs.get(ch)
@@ -99,21 +102,21 @@ class Canvas:
                 for gx, c in enumerate(row):
                     if c == "#":
                         if shadow is not None:
-                            self.rect(cx + gx * scale + 1, y + gy * scale + 1, scale, scale, shadow)
-                        self.rect(cx + gx * scale, y + gy * scale, scale, scale, col)
+                            self.rect(cx + gx * scale + 1, y + gy * sy + 1, scale, sy, shadow)
+                        self.rect(cx + gx * scale, y + gy * sy, scale, sy, col)
             cx += (len(g[0]) + 1) * scale
         return cx - x
 
     def text_width(self, s, font="5x7", scale=1):
-        glyphs = FONT5 if font == "5x7" else FONT3
+        glyphs = FONTS[font]
         w = 0
         for ch in s:
             g = glyphs.get(ch)
             w += ((len(g[0]) + 1) if g else (3 if font == "5x7" else 2)) * scale
         return w - scale
 
-    def text_c(self, cx, y, s, col, font="5x7", scale=1, shadow=None):
-        self.text(cx - self.text_width(s, font, scale) // 2, y, s, col, font, scale, shadow)
+    def text_c(self, cx, y, s, col, font="5x7", scale=1, shadow=None, sy=None):
+        self.text(cx - self.text_width(s, font, scale) // 2, y, s, col, font, scale, shadow, sy)
 
     def save(self, path):
         img = bpy.data.images.new(os.path.basename(path), self.w, self.h, alpha=True)
@@ -188,6 +191,38 @@ FONT3 = {
     "N": ["# #", "###", "###", "# #", "# #"],
 }
 
+# Thin 4x7 letters for the OPEN sign: 1-texel strokes with a real N diagonal (the 3x5 N read as M).
+FONT4 = {
+    "O": [" ## ", "#  #", "#  #", "#  #", "#  #", "#  #", " ## "],
+    "P": ["### ", "#  #", "#  #", "### ", "#   ", "#   ", "#   "],
+    "E": ["####", "#   ", "#   ", "### ", "#   ", "#   ", "####"],
+    "N": ["#  #", "## #", "## #", "# ##", "# ##", "#  #", "#  #"],
+}
+# Warmer lid labels (M18): the 3x5 letters plus the ones the labels need; N and W are wider so
+# they don't read as H or M.
+FONT_LBL = dict(FONT3, **{
+    "A": [" # ", "# #", "###", "# #", "# #"], "B": ["## ", "# #", "## ", "# #", "## "],
+    "C": [" ##", "#  ", "#  ", "#  ", " ##"], "G": [" ##", "#  ", "# #", "# #", " ##"],
+    "H": ["# #", "# #", "###", "# #", "# #"], "L": ["#  ", "#  ", "#  ", "#  ", "###"],
+    "N": ["#  #", "## #", "# ##", "#  #", "#  #"], "R": ["## ", "# #", "## ", "# #", "# #"],
+    "S": [" ##", "#  ", " # ", "  #", "## "], "T": ["###", " # ", " # ", " # ", " # "],
+    "U": ["# #", "# #", "# #", "# #", "###"], "W": ["#   #", "#   #", "# # #", "# # #", " # # "],
+})
+# Warmer name boards (M24): 4x7 letters for the 1-2 big words on each lid.
+FONT_TAG = dict(FONT4, **{
+    "A": [" ## ", "#  #", "#  #", "####", "#  #", "#  #", "#  #"],
+    "B": ["### ", "#  #", "#  #", "### ", "#  #", "#  #", "### "],
+    "C": [" ## ", "#  #", "#   ", "#   ", "#   ", "#  #", " ## "],
+    "D": ["### ", "#  #", "#  #", "#  #", "#  #", "#  #", "### "],
+    "G": [" ## ", "#  #", "#   ", "# ##", "#  #", "#  #", " ###"],
+    "H": ["#  #", "#  #", "#  #", "####", "#  #", "#  #", "#  #"],
+    "L": ["#   ", "#   ", "#   ", "#   ", "#   ", "#   ", "####"],
+    "R": ["### ", "#  #", "#  #", "### ", "# # ", "#  #", "#  #"],
+    "T": ["###", " # ", " # ", " # ", " # ", " # ", " # "],
+    "U": ["#  #", "#  #", "#  #", "#  #", "#  #", "#  #", " ## "],
+})
+FONTS = {"5x7": FONT5, "3x5": FONT3, "4x7": FONT4, "lbl": FONT_LBL, "tag": FONT_TAG}
+
 
 # ---------------------------------------------------------------------------
 # Atlas: colour swatches in the top 32 rows, painted regions below
@@ -210,7 +245,7 @@ PALETTE = {
     "red_bean": (110, 30, 36), "corn": (250, 210, 60), "attap": (240, 240, 220),
     "grass_jelly": (40, 34, 36), "jelly_red": (230, 50, 60), "jelly_green": (60, 200, 100),
     "mango": (255, 170, 30), "pandan": (70, 190, 80), "gula": (110, 60, 30),
-    "coconut": (250, 248, 240), "soup_yellow": (232, 210, 120), "durian": (238, 214, 110),
+    "coconut": (250, 248, 240), "soup_yellow": (232, 210, 120), "soup_coconut": (250, 242, 222), "soup_black": (74, 32, 54), "durian": (238, 214, 110),
     "milk": (255, 252, 236), "pot_inner": (60, 52, 40),
     # props
     "bowl_glass": (196, 226, 230), "bowl_white": (240, 240, 236), "bowl_rim": (60, 110, 190),
@@ -272,9 +307,20 @@ def paint_signboard():
         draw_dessert(atlas, cx, y + 28, item)
 
 
+# Board photos of the fruit ices: syrup-tinted mound, fruit piece colours, piece size.
+FRUIT_ICE_LOOK = {
+    "ice_lychee": ((246, 244, 236), ((236, 226, 222), (255, 255, 252), (210, 196, 196)), 2),
+    "ice_longan": ((244, 230, 196), ((150, 96, 50), (236, 222, 186)), 2),
+    "ice_sea_coconut": ((232, 244, 248), ((206, 220, 196), (250, 252, 246), (170, 190, 170)), 2),
+    "ice_soursop": ((248, 244, 226), ((30, 24, 20), (236, 232, 206)), 2),
+    "red_ruby_ice": ((252, 236, 238), ((220, 30, 60), (250, 80, 110)), 2),
+    "ice_jelly_cocktail": ((248, 240, 230), ((230, 40, 50), (250, 200, 40), (90, 190, 80), (250, 140, 40), (150, 80, 200)), 2),
+}
+
+
 def draw_dessert(cv, cx, by, item_id):
     """Little dessert 'photo' for menu tiles. cx = centre x, by = bowl bottom y."""
-    soup = item_id in ("tau_suan", "bobo_chacha", "pulut_hitam")
+    soup = any(m["id"] == item_id and m["kind"] == "soup" for m in MENU)
     if soup:
         # wide white bowl with blue rim, soup surface seen from above
         for i in range(7):
@@ -282,8 +328,17 @@ def draw_dessert(cv, cx, by, item_id):
             cv.rect(cx - half, by - 7 + i, half * 2, 1, C(240, 240, 236))
         cv.rect(cx - 11, by - 8, 22, 1, C(60, 110, 190))
         surf = {"tau_suan": C(232, 206, 110), "bobo_chacha": C(244, 236, 214),
-                "pulut_hitam": C(60, 24, 50)}[item_id]
+                "pulut_hitam": C(60, 24, 50), "cheng_tng": C(214, 176, 116), "sweet_potato_soup": C(218, 164, 72),
+                "red_bean_soup": C(122, 40, 46), "green_bean_soup": C(156, 150, 72)}[item_id]
         cv.ellipse(cx, by - 9, 10, 3, surf)
+        bits = {"cheng_tng": ((-5, 0, C(250, 246, 230)), (-1, -1, C(132, 86, 44)), (3, 0, C(234, 218, 172)), (6, 1, C(250, 246, 230))),
+                "sweet_potato_soup": ((-5, 0, C(250, 138, 36)), (0, -1, C(252, 212, 84)), (4, 1, C(250, 138, 36))),
+                "red_bean_soup": ((-5, 0, C(84, 20, 28)), (-1, 1, C(84, 20, 28)), (3, -1, C(84, 20, 28)), (6, 0, C(84, 20, 28))),
+                "green_bean_soup": ((-5, 0, C(92, 128, 48)), (-1, 1, C(92, 128, 48)), (3, -1, C(92, 128, 48)), (6, 0, C(92, 128, 48)))}
+        if item_id in bits:
+            for dx, dy, c in bits[item_id]:
+                cv.rect(cx + dx, by - 9 + dy, 2, 1, c)
+            return
         if item_id == "tau_suan":
             cv.rect(cx + 3, by - 15, 9, 3, C(200, 140, 60))   # you tiao on the side
             cv.rect(cx + 4, by - 14, 7, 1, C(230, 180, 90))
@@ -321,6 +376,13 @@ def draw_dessert(cv, cx, by, item_id):
         for dx, dy in ((-6, -3), (-2, -6), (3, -4), (5, -1), (0, -10), (-4, -8)):
             cv.rect(cx + dx, top + dy, 2, 2, C(255, 160, 20))
         cv.rect(cx - 4, top - 11, 8, 1, C(255, 190, 60))
+    elif item_id in FRUIT_ICE_LOOK:
+        mound, bits, size = FRUIT_ICE_LOOK[item_id]
+        cv.ellipse(cx, top, 9, 12, C(*mound), top_only=True)
+        for k, (dx, dy) in enumerate(((-6, -3), (-2, -6), (3, -4), (5, -1), (0, -10), (-4, -8), (2, -8), (-1, -2))):
+            cv.rect(cx + dx, top + dy, size, size, C(*bits[k % len(bits)]))
+        if item_id == "red_ruby_ice":                               # coconut milk on top
+            cv.ellipse(cx, top - 11, 5, 2, C(255, 255, 250))
     else:  # chendol
         cv.ellipse(cx, top, 9, 11, C(250, 248, 240), top_only=True)
         for yy in range(1, 10, 2):
@@ -331,22 +393,56 @@ def draw_dessert(cv, cx, by, item_id):
             cv.ellipse(cx, top - 11, 4, 2, C(238, 214, 110))
 
 
+# The lightbox has its own texture, assets/textures/menu.png ("menu" material): all 19 items in
+# board order ("no") as 2 rows (10 + 9) of photo tiles with prices. Nearest sampling drops
+# texels when a texture shows smaller than 1 px per texel (that garbled the v1 prices), so the
+# texture is sized to the box's size in the waiting view: ~210 x 40 px. scripts/stall.gd
+# darkens unbought tiles at runtime with the same layout: keep MENU_* in step with it.
+MENU_TEX_W, MENU_TEX_H = 210, 40
+MENU_TILE = (21, 19)                # tile + 1 texel gap
+MENU_COLS = 10
+menu_tex = Canvas(MENU_TEX_W, MENU_TEX_H, (30, 70, 170))
+
+
+def board_items():
+    return sorted(MENU, key=lambda m: m["no"])
+
+
+def menu_tile_xy(i):
+    """Top-left texel of board tile i; the short second row is centred."""
+    row, col = divmod(i, MENU_COLS)
+    n = min(MENU_COLS, len(MENU) - row * MENU_COLS)
+    return (MENU_TEX_W - n * MENU_TILE[0]) // 2 + col * MENU_TILE[0], 1 + row * MENU_TILE[1]
+
+
+def shrink(src, w, h):
+    """Area-average downscale of an (h, w, 4) array: the 25 texel tall photos into 12."""
+    sh, sw = src.shape[:2]
+    out = np.zeros((h, w, 4), dtype=np.float32)
+    for y in range(h):
+        y0 = y * sh // h
+        y1 = max(y0 + 1, (y + 1) * sh // h)
+        for x in range(w):
+            x0 = x * sw // w
+            x1 = max(x0 + 1, (x + 1) * sw // w)
+            out[y, x] = src[y0:y1, x0:x1].reshape(-1, 4).mean(0)
+    return out
+
+
 def paint_menu_lightbox():
-    # Ref 01 + 05: backlit menu strip of numbered photo tiles with prices.
-    x, y, w, h = region("menu_ours", 0, 64, 256, 48)
-    atlas.rect(x, y, w, h, C(30, 70, 170))
-    atlas.rect(x, y, w, 2, C(90, 140, 230))
-    for i, item in enumerate(MENU):
-        tx = x + 2 + i * 28
-        ty = y + 3
-        atlas.rect(tx, ty, 27, 43, C(252, 250, 244))
-        atlas.rect(tx, ty + 30, 27, 13, C(255, 236, 120))
-        draw_dessert(atlas, tx + 14, ty + 29, item["id"])
-        atlas.rect(tx, ty, 7, 7, C(220, 40, 50))
-        atlas.text(tx + 2, ty + 1, str(item["no"]), C(255, 255, 255), font="3x5")
+    # Ref 01 + 05: backlit menu of photo tiles with prices. Tile numbers left out: no room.
+    tw, th = MENU_TILE[0] - 1, MENU_TILE[1] - 1
+    photo_h = th - 6
+    for i, item in enumerate(board_items()):
+        tx, ty = menu_tile_xy(i)
+        tmp = Canvas(26, 27, (252, 250, 244))
+        draw_dessert(tmp, 13, 26, item["id"])
+        menu_tex.a[ty:ty + photo_h, tx:tx + tw] = shrink(tmp.a[2:27, 2:24], tw, photo_h)
+        menu_tex.rect(tx, ty + photo_h, tw, 6, C(255, 236, 120))
         price = "$%d.%02d" % (item["price"] // 100, item["price"] % 100)
-        atlas.text_c(tx + 14, ty + 34, price, C(200, 30, 40), font="3x5")
-    atlas.noise(x, y, w, h, 0.05, 2)
+        menu_tex.text_c(tx + tw // 2 + 1, ty + photo_h + 1, price, C(200, 30, 40), font="3x5")
+    menu_tex.noise(0, 0, MENU_TEX_W, MENU_TEX_H, 0.05, 2)
+    menu_tex.save(os.path.join(TEX_DIR, "menu.png"))
 
 
 def paint_neighbours():
@@ -409,12 +505,13 @@ def paint_props():
         for ly in range(9, 14, 2):
             atlas.rect(px_ + 2, y + ly, 10 - (ly % 3), 1, C(80, 80, 90))
 
-    # "OPEN" sign (red letters on white, like the stand in ref 05). Chunky 3x5 letters at about
-    # one texel per screen pixel: the 5x7 version lost letters at the 480x270 render size.
-    x, y, w, h = region("open_sign", 112, 152, 19, 9)
+    # "OPEN" sign (red letters on white, like the stand in ref 05). The region is sized so one
+    # texel is about one screen pixel in the waiting view (26x12 px at 480x270): at 1.4 px per
+    # texel nearest sampling doubled some strokes and the letters looked thick.
+    x, y, w, h = region("open_sign", 112, 152, 26, 12)
     atlas.rect(x, y, w, h, C(255, 255, 255))
     atlas.outline(x, y, w, h, C(200, 30, 40))
-    atlas.text(x + 2, y + 2, "OPEN", C(220, 30, 40), font="3x5")
+    atlas.text(x + 4, y + 3, "OPEN", C(220, 30, 40), font="4x7")
 
     # Stall number plate.
     x, y, w, h = region("stall_no", 142, 152, 30, 11)
@@ -527,6 +624,43 @@ def paint_props():
         for _ in range(12):
             atlas.px(x + rng.randrange(8), y + rng.randrange(8), C(*b))
 
+    # Fruit jars (M17): the top of the fruit in its syrup, and the side seen through the glass.
+    for i, f in enumerate(FRUITS):
+        info = INGREDIENTS[f]
+        cols = [tuple(c) for c in info.get("colors", [info["color"], info["color2"]])]
+        for row, name in enumerate(("jar_", "jarside_")):
+            x, y, w, h = region(name + f, 168 + i * 8, 216 + row * 8, 8, 8)
+            syrup = info["syrup"] if row == 0 else [int(v) for v in _mix(info["syrup"], (90, 90, 90), 0.15)]
+            atlas.rect(x, y, w, h, C(*syrup))
+            for k in range(10 if row == 0 else 7):
+                c = cols[k % len(cols)]
+                if "seed" in info and k % 3 == 2:
+                    atlas.px(x + rng.randrange(8), y + rng.randrange(8), C(*info["seed"]))
+                    continue
+                px, py = x + rng.randrange(7), y + rng.randrange(7)
+                atlas.rect(px, py, 2, 2 if info.get("shape") != "slab" else 1, C(*c))
+
+    # Warmer wells (M18): each soup seen from above with its pieces, and the label on its lid.
+    for i, (soup, _dx, _dy, label) in enumerate(WELLS):
+        info = INGREDIENTS[soup]
+        x, y, w, h = region("well_" + soup, i * 8, 232, 8, 8)
+        atlas.rect(x, y, w, h, C(*info["color"]))
+        for _ in range(8):
+            atlas.px(x + rng.randrange(8), y + rng.randrange(8), C(*info["color2"]))
+        for p in info.get("pieces", []):
+            for k in range(min(p["count"], 6)):
+                atlas.rect(x + rng.randrange(7), y + rng.randrange(7), 2 if p["size"] > 0.015 else 1, 1,
+                           C(*(p["color"] if k % 2 == 0 else p["color2"])))
+        # M24 name board: cream with a border in the soup's colour, 1-2 words in 4x7 letters (the
+        # free rows 64-112 once held the old lightbox)
+        x, y, w, h = region("lid_" + soup, i * 40, 64, *TAG_TEX)
+        atlas.rect(x, y, w, h, C(*info["color"]))
+        atlas.rect(x + 1, y + 1, w - 2, h - 2, C(244, 240, 226))
+        lines = label.split("|")
+        for k, line in enumerate(lines):
+            assert atlas.text_width(line, "tag") <= w - 4, line
+            atlas.text_c(x + w // 2, y + (2 + k * 8 if len(lines) == 2 else 6), line, C(36, 34, 40), font="tag")
+
     # Labels for the milk cans and coconut carton (wrapped round the side).
     x, y, w, h = region("can_evap_milk", 32, 200, 16, 8)
     atlas.rect(x, y, w, h, C(40, 90, 180))
@@ -543,162 +677,267 @@ def paint_props():
     atlas.ellipse(x + 8, y + 3, 2, 2, C(120, 80, 40))
 
 
-# Customer types (M4). lower: "pants", "shorts" (bare shins) or "skirt". long = long sleeves.
+# Customers (M12), after plan refs 07-08 (#256fes): tapered low-poly bodies, a hair "helmet"
+# with a fringe, the v1 painted faces, clothes painted with soft gradients. Everything
+# on a customer samples its own 128x128 texture, assets/textures/people.png ("people"
+# material), painted here: one 64x42 block per customer (see PEOPLE_BLOCK). Parts are lathed
+# rings (wrap_lathe) whose texture wraps round them, the front (-Y) in the middle.
 # The game reads the type ids from the cust_<id> objects (scripts/customers/customer_queue.gd).
+PEOPLE_W = PEOPLE_H = 128
+people = Canvas(PEOPLE_W, PEOPLE_H, (255, 0, 255))
+# block-relative rects (x, y, w, h): wrap textures, then a column of 2x2 colour cells
+PEOPLE_BLOCK = {"torso": (0, 0, 40, 24), "head": (0, 24, 40, 18), "leg": (40, 0, 12, 24),
+                "arm": (52, 0, 12, 24), "hair": (40, 24, 12, 18), "cells": (52, 24, 12, 18)}
+CELLS = ("skin", "hair", "shoe", "extra", "extra2", "hat")
+# z ranges the wraps cover (metres, before the type's scale)
+TORSO_Z = (0.72, 1.44)
+HEAD_Z = (0.0, 0.3)
+LEG_Z = (0.0, 0.8)
+ARM_Z = (-0.63, 0.0)                           # top 0 = tucked under the torso's shoulder ring
+ARM_ELBOW = -0.29
+SLEEVE_Z = {"long": -0.525, "short": -0.21}  # cuff z, on a texel row edge (24 rows over 0.63)
+# arm radius bottom to top: rounded hand, wrist, forearm, elbow, upper arm
+ARM_PROFILE = [(-0.63, 0.0), (-0.623, 0.02), (-0.605, 0.034), (-0.58, 0.037), (-0.56, 0.032),
+               (-0.54, 0.031), (-0.42, 0.04), (-0.34, 0.043), (ARM_ELBOW, 0.041), (-0.19, 0.05),
+               (-0.08, 0.056), (0.0, 0.055)]
+
+SKIN = {"lt": (238, 196, 160), "md": (214, 162, 118), "dk": (172, 118, 82)}
 CUSTOMERS = {
-    "office_man":  dict(skin="c_skin_lt", hair="c_hair_black", hair_style="short", top="c_shirt",
-                        lower="pants", bottom="c_navy", shoes="c_shoe_black", long=True),
-    "auntie":      dict(skin="c_skin_md", hair="c_hair_black", hair_style="perm", top="c_floral",
-                        lower="pants", bottom="c_black", shoes="c_sandal", extra=("handbag",)),
-    "schoolboy":   dict(skin="c_skin_lt", hair="c_hair_black", hair_style="short", top="c_shirt",
-                        lower="shorts", bottom="c_navy", shoes="c_shoe_white", scale=0.8, extra=("backpack",)),
-    "office_lady": dict(skin="c_skin_lt", hair="c_hair_brown", hair_style="bun", top="c_blazer",
-                        lower="skirt", bottom="c_skirt", shoes="c_shoe_black", long=True),
-    "grandpa":     dict(skin="c_skin_dk", hair="c_hair_white", hair_style="short", top="c_polo",
-                        lower="pants", bottom="c_khaki", shoes="slipper"),
-    "teen_girl":   dict(skin="c_skin_md", hair="c_hair_black", hair_style="ponytail", top="c_lilac",
-                        lower="shorts", bottom="c_denim", shoes="c_shoe_white"),
-    "worker":      dict(skin="c_skin_dk", hair="c_hair_black", hair_style="hardhat", top="c_hivis",
-                        sleeves="c_work_grey", lower="pants", bottom="c_work_grey", shoes="c_boot"),
-    "grandma":     dict(skin="c_skin_md", hair="c_hair_grey", hair_style="bun", top="c_samfu",
-                        lower="pants", bottom="c_samfu", shoes="slipper", long=True),
+    "auntie":  dict(skin="md", hair=(36, 30, 34), hair_style="perm", top=(234, 112, 146), sleeves="short",
+                    pattern="floral", bottom=(46, 44, 54), lower="pants", shoe=(150, 96, 60), socks=None,
+                    extra=(150, 82, 44), extras=("handbag",), lips=(200, 60, 80)),
+    "grandpa": dict(skin="dk", hair=(226, 226, 222), hair_style="short", top=(62, 156, 112), sleeves="short",
+                    pattern="polo", bottom=(196, 176, 136), lower="pants", shoe=(50, 96, 180), socks=None,
+                    specs=True),
+    "student": dict(skin="lt", hair=(34, 30, 36), hair_style="short", top=(246, 248, 250), sleeves="short",
+                    pattern="school", bottom=(46, 58, 104), lower="shorts", shoe=(240, 240, 240),
+                    socks=(250, 250, 250), extra=(214, 64, 64), extras=("backpack",), scale=0.86),
+    "office":  dict(skin="lt", hair=(40, 32, 30), hair_style="short", top=(232, 238, 248), sleeves="long",
+                    pattern="tie", bottom=(48, 56, 92), lower="pants", shoe=(30, 28, 30), socks=None,
+                    extra=(60, 110, 200)),
+    "worker":  dict(skin="dk", hair=(30, 28, 30), hair_style="hardhat", top=(255, 132, 24), sleeves="long",
+                    sleeve_col=(112, 116, 124), pattern="hivis", bottom=(100, 104, 112), lower="pants",
+                    shoe=(110, 74, 44), socks=None, hat=(250, 206, 30)),
+    "teen":    dict(skin="lt", hair=(150, 118, 110), hair_style="bob", top=(178, 160, 232), sleeves="long",
+                    pattern="jacket", bottom=(36, 36, 42), lower="shorts", shoe=(244, 244, 244),
+                    socks=(250, 250, 250), extra=(236, 226, 90), lips=(220, 110, 120)),
 }
 
 
-def _pc(name, k=1.0):
-    r, g, b = PALETTE[name]
-    return C(min(int(r * k), 255), min(int(g * k), 255), min(int(b * k), 255))
+def _cc(rgb, k=1.0):
+    return C(*(max(0, min(255, int(v * k))) for v in rgb))
 
 
-def paint_customers():
-    """16x16 face and shirt-front per customer type, in the free atlas rows 208-240."""
-    for i, (cid, p) in enumerate(CUSTOMERS.items()):
-        paint_customer_face(cid, p, *region("cface_" + cid, 32 + i * 16, 208, 16, 16))
-        paint_customer_front(cid, p, *region("cfront_" + cid, 32 + i * 16, 224, 16, 16))
+def _mix(a, b, t):
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
 
-def paint_customer_face(cid, p, x, y, w, h):
-    skin, hair = _pc(p["skin"]), _pc(p["hair"])
-    shade = _pc(p["skin"], 0.82)
-    dark = C(30, 22, 24)
-    old = cid in ("grandpa", "grandma")
-    lady = cid in ("auntie", "office_lady", "teen_girl", "grandma")
-    atlas.rect(x, y, w, h, skin)
-    style = p["hair_style"]
-    if style == "hardhat":
-        atlas.rect(x, y, w, 2, hair)
-    elif style == "perm":
-        atlas.rect(x, y, w, 4, hair)
-        atlas.rect(x, y, 2, 10, hair)
-        atlas.rect(x + 14, y, 2, 10, hair)
-        for k in range(1, 15, 3):
-            atlas.px(x + k, y + 4, hair)
-    elif lady:
-        atlas.rect(x, y, w, 3, hair)
-        atlas.rect(x, y, 2, 8, hair)
-        atlas.rect(x + 14, y, 2, 8, hair)
-        atlas.rect(x + 2, y + 3, 5, 1, hair)        # side-swept fringe
+def people_block(i):
+    return (i % 2) * 64, (i // 2) * 42
+
+
+def people_rect(cid, part):
+    bx, by = people_block(list(CUSTOMERS).index(cid))
+    x, y, w, h = PEOPLE_BLOCK[part]
+    return bx + x, by + y, w, h
+
+
+def people_cell(cid, name):
+    """Texel centre of one of the type's 2x2 solid colour cells."""
+    x, y, _, _ = people_rect(cid, "cells")
+    k = CELLS.index(name)
+    return x + 1 + (k % 6) * 2, y + 1 + (k // 6) * 2
+
+
+def _wrap_shade(w, i, k_front=1.06, k_back=0.84):
+    """Baked soft light: brightest at the front (middle column), darker round the back."""
+    t = abs((i + 0.5) / w - 0.5) * 2    # 0 front .. 1 back
+    return k_front + (k_back - k_front) * t
+
+
+def paint_people():
+    for cid, p in CUSTOMERS.items():
+        skin = SKIN[p["skin"]]
+        x, y, _, _ = people_rect(cid, "cells")
+        people.rect(x, y, 12, 18, _cc(skin))
+        for name, col in (("skin", skin), ("hair", p["hair"]), ("shoe", p["shoe"]),
+                          ("extra", p.get("extra", p["top"])), ("extra2", _mix(p.get("extra", p["top"]), (0, 0, 0), 0.3)),
+                          ("hat", p.get("hat", p["hair"]))):
+            cx, cy = people_cell(cid, name)
+            people.rect(cx - 1, cy - 1, 2, 2, _cc(col))
+        paint_torso(cid, p, *people_rect(cid, "torso"))
+        paint_head(cid, p, *people_rect(cid, "head"))
+        paint_hair(cid, p, *people_rect(cid, "hair"))
+        paint_limb(cid, p, "arm", *people_rect(cid, "arm"))
+        paint_limb(cid, p, "leg", *people_rect(cid, "leg"))
+    people.save(os.path.join(TEX_DIR, "people.png"))
+
+
+def paint_torso(cid, p, x, y, w, h):
+    """Row 0 = neck (TORSO_Z top), row h-1 = hem. Middle column = front."""
+    top, skin = p["top"], SKIN[p["skin"]]
+    for i in range(w):
+        for j in range(h):
+            k = _wrap_shade(w, i) * (1.08 - 0.22 * j / h)        # light from above
+            people.px(x + i, y + j, _cc(top, k))
+    people.rect(x, y, w, 1, _cc(skin, 0.92))                     # neck (row 1 = shoulder slope)
+    people.rect(x, y + h - 2, w, 2, _cc(top, 0.72))              # hem shadow
+    c = x + w // 2                                               # front centre column
+    pat = p["pattern"]
+    r = random.Random(cid)
+    if pat == "floral":
+        people.rect(c - 3, y + 1, 6, 2, _cc(skin, 0.95))         # round neckline
+        for _ in range(26):
+            fx, fy = x + r.randrange(0, w), y + r.randrange(4, h - 3)
+            col = (255, 226, 90) if r.random() < 0.5 else (255, 246, 240)
+            for dx, dy in ((0, 0), (1, 0), (0, 1), (-1, 0), (0, -1)):
+                people.px(fx + dx, fy + dy, _cc(col))
+            people.px(fx, fy, _cc((250, 140, 50)))
+    elif pat == "polo":
+        people.rect(c - 4, y + 1, 8, 2, _cc(top, 0.7))           # collar
+        people.rect(c - 1, y + 4, 2, 5, _cc(top, 0.85))          # placket
+        people.px(c - 1, y + 5, _cc((245, 245, 240)))
+        people.px(c - 1, y + 7, _cc((245, 245, 240)))
+        people.rect(c + 4, y + 6, 2, 2, _cc((250, 216, 70)))     # logo
+        people.rect(x, y + h - 5, w, 1, _cc(top, 0.8))           # untucked hem line
+    elif pat == "school":
+        people.rect(c - 3, y + 1, 2, 2, _cc((210, 214, 224)))    # collar points
+        people.rect(c + 1, y + 1, 2, 2, _cc((210, 214, 224)))
+        for j in (5, 9, 13, 17):
+            people.px(c, y + j, _cc((170, 176, 190)))            # buttons
+        people.rect(c + 3, y + 7, 3, 3, _cc((40, 70, 170)))      # badge
+        people.px(c + 4, y + 8, _cc((250, 210, 60)))
+        people.rect(x, y + h - 4, w, 2, _cc(p["bottom"]))        # tucked into the shorts
+        for sx in (c - 6, c + 5):                                # backpack straps, at the sides
+            people.rect(sx, y + 1, 1, h - 6, _cc(p["extra"], 0.7))
+    elif pat == "tie":
+        people.rect(c - 3, y + 1, 2, 2, _cc((210, 214, 224)))
+        people.rect(c + 1, y + 1, 2, 2, _cc((210, 214, 224)))
+        people.rect(c - 1, y + 3, 2, 2, _cc((150, 24, 34)))      # knot
+        people.rect(c - 1, y + 5, 2, 12, _cc((190, 34, 46)))     # tie
+        people.px(c - 1, y + 17, _cc((190, 34, 46)))
+        for sx in (c - 4, c + 3):                                # lanyard + pass
+            people.rect(sx, y + 1, 1, 9, _cc(p["extra"]))
+        people.rect(c - 5, y + 11, 3, 4, _cc((250, 250, 250)))
+        people.rect(x, y + h - 4, w, 2, _cc((30, 30, 34)))       # belt
+        people.rect(x, y + h - 2, w, 2, _cc(p["bottom"], 0.9))
+    elif pat == "hivis":
+        grey = p["sleeve_col"]
+        people.rect(c - 3, y + 1, 6, 3, _cc(grey))               # shirt at the neck
+        for j in (11, 17):                                       # reflective strips
+            people.rect(x, y + j, w, 2, _cc((236, 240, 214)))
+        people.rect(c, y + 4, 1, h - 6, _cc((150, 70, 10)))      # zip
+        people.rect(x, y + h - 2, w, 2, _cc(p["bottom"], 0.9))
+    elif pat == "jacket":
+        people.rect(c - 3, y + 1, 6, h - 4, _cc((248, 248, 250)))     # white top inside, open front
+        people.rect(c - 4, y + 1, 1, h - 4, _cc((250, 250, 255)))     # zip edges, light
+        people.rect(c + 3, y + 1, 1, h - 4, _cc((250, 250, 255)))
+        people.rect(c - 3, y + h - 6, 6, 4, _cc((240, 240, 246)))
+        people.rect(c - 9, y + 7, 4, 5, _cc(p["extra"]))              # yellow badge on the chest (ref 07)
+        people.rect(c - 8, y + 8, 2, 2, _cc(p["extra"], 0.8))
+        people.rect(x, y + h - 3, w, 2, _cc((250, 250, 252)))         # white hem band
+        for sx in (x + 6, x + w - 7):                                 # side seams
+            people.rect(sx, y + 4, 1, h - 7, _cc(p["top"], 0.86))
+    people.noise(x, y, w, h, 0.05, 13)
+
+
+def paint_head(cid, p, x, y, w, h):
+    """Row 0 = top of the head, row h-1 = neck. Face in the middle columns (front facets 3-4);
+    the hair mesh covers the top, back and sides. The v1 faces, one per look: small dark eyes,
+    brows, a smiling mouth, plus the type's own marks. v1 painted a flat 16x16 front; here its
+    column k is c-8+k and its row r is r+2, so brows 7, eyes 9-10, nose 12, mouth 14."""
+    skin = SKIN[p["skin"]]
+    for i in range(w):
+        for j in range(h):
+            people.px(x + i, y + j, _cc(skin, _wrap_shade(w, i, 1.04, 0.9)))
+    c = x + w // 2
+    people.rect(x, y, w, 7, _cc(p["hair"]))                      # under the fringe
+    people.rect(x, y + h - 2, w, 2, _cc(skin, 0.86))             # chin shadow
+    shade, dark = _cc(skin, 0.82), _cc((30, 22, 24))
+    old = cid == "grandpa"
+    lady = cid in ("auntie", "teen")
+    brow = _cc(p["hair"], 0.7) if sum(p["hair"]) > 500 else _cc(p["hair"])
+    people.rect(c - 5, y + 7, 3, 1, brow)
+    people.rect(c + 2, y + 7, 3, 1, brow)
+    people.rect(c - 4, y + 9, 2, 2, dark)
+    people.rect(c + 2, y + 9, 2, 2, dark)
+    if lady:                                                     # lashes
+        people.px(c - 5, y + 9, dark)
+        people.px(c + 4, y + 9, dark)
+    people.rect(c - 1, y + 12, 2, 1, shade)                      # nose
+    if old:                                                      # smile lines and crow's feet
+        people.px(c - 6, y + 10, shade)
+        people.px(c + 5, y + 10, shade)
+        people.px(c - 4, y + 13, shade)
+        people.px(c + 3, y + 13, shade)
+    if p.get("specs"):                                           # brown-rim specs
+        people.outline(c - 6, y + 8, 5, 4, _cc((90, 60, 40)))
+        people.outline(c + 1, y + 8, 5, 4, _cc((90, 60, 40)))
+        people.rect(c - 1, y + 9, 2, 1, _cc((90, 60, 40)))
+    lips = _cc(p.get("lips", (150, 70, 62)))
+    if cid == "student":                                         # big grin with teeth
+        people.rect(c - 3, y + 14, 6, 2, _cc((120, 40, 40)))
+        people.rect(c - 2, y + 14, 4, 1, _cc((250, 250, 250)))
     else:
-        atlas.rect(x, y, w, 3, hair)
-        atlas.rect(x, y, 1, 6, hair)
-        atlas.rect(x + 15, y, 1, 6, hair)
-        atlas.rect(x + 3, y + 3, 4, 1, hair)
-    brow = _pc(p["hair"], 0.7) if p["hair"] in ("c_hair_white", "c_hair_grey") else hair
-    atlas.rect(x + 3, y + 5, 3, 1, brow)
-    atlas.rect(x + 10, y + 5, 3, 1, brow)
-    atlas.rect(x + 4, y + 7, 2, 2, dark)
-    atlas.rect(x + 10, y + 7, 2, 2, dark)
-    if lady:                                        # lashes
-        atlas.px(x + 3, y + 7, dark)
-        atlas.px(x + 12, y + 7, dark)
-    atlas.rect(x + 7, y + 10, 2, 1, shade)          # nose
-    if old:                                         # smile lines and crow's feet
-        atlas.px(x + 2, y + 8, shade)
-        atlas.px(x + 13, y + 8, shade)
-        atlas.px(x + 4, y + 11, shade)
-        atlas.px(x + 11, y + 11, shade)
-    if cid == "grandpa":                            # brown-rim specs
-        atlas.outline(x + 2, y + 6, 5, 4, C(90, 60, 40))
-        atlas.outline(x + 9, y + 6, 5, 4, C(90, 60, 40))
-        atlas.rect(x + 7, y + 7, 2, 1, C(90, 60, 40))
-    lips = C(200, 50, 70) if cid in ("office_lady", "auntie") else C(150, 70, 62)
-    if cid == "schoolboy":                          # big grin with teeth
-        atlas.rect(x + 5, y + 12, 6, 2, C(120, 40, 40))
-        atlas.rect(x + 6, y + 12, 4, 1, C(250, 250, 250))
-    else:
-        atlas.rect(x + 6, y + 12, 4, 1, lips)
-        atlas.px(x + 5, y + 11, lips)
-        atlas.px(x + 10, y + 11, lips)
-    if cid in ("teen_girl", "schoolboy", "grandma", "auntie"):
-        atlas.rect(x + 2, y + 10, 2, 1, C(232, 130, 110))
-        atlas.rect(x + 12, y + 10, 2, 1, C(232, 130, 110))
-    if cid == "worker":                             # stubble
-        for k in range(4, 12, 2):
-            atlas.px(x + k, y + 14, shade)
-            atlas.px(x + k + 1, y + 13, shade)
+        people.rect(c - 2, y + 14, 4, 1, lips)
+        people.px(c - 3, y + 13, lips)
+        people.px(c + 2, y + 13, lips)
+    if cid in ("teen", "student", "auntie"):                     # blush
+        people.rect(c - 6, y + 12, 2, 1, _cc((232, 130, 110)))
+        people.rect(c + 4, y + 12, 2, 1, _cc((232, 130, 110)))
+    if cid == "worker":                                          # stubble
+        for k in range(-4, 2, 2):
+            people.px(c + k, y + 16, shade)
+            people.px(c + k + 1, y + 15, shade)
 
 
-def paint_customer_front(cid, p, x, y, w, h):
-    """Torso front, top row = shoulders."""
-    top, skin = _pc(p["top"]), _pc(p["skin"])
-    atlas.rect(x, y, w, h, top)
-    r = random.Random(sum(map(ord, cid)))   # same pattern every build
-    if cid == "office_man":
-        atlas.rect(x + 5, y, 2, 2, C(210, 214, 220))          # collar points
-        atlas.rect(x + 9, y, 2, 2, C(210, 214, 220))
-        atlas.rect(x + 7, y + 1, 2, 2, C(150, 24, 34))         # tie knot
-        atlas.rect(x + 7, y + 3, 2, 10, C(180, 30, 40))
-        atlas.px(x + 7, y + 13, C(180, 30, 40))
-        atlas.outline(x + 2, y + 5, 3, 3, C(200, 204, 212))     # pocket
-        atlas.rect(x, y + 15, w, 1, C(30, 30, 34))             # belt
-    elif cid == "auntie":
-        atlas.ellipse(x + 8, y, 3, 2, skin)
-        for _ in range(9):
-            fx, fy = x + r.randrange(1, 15), y + r.randrange(3, 15)
-            col = C(255, 220, 80) if r.random() < 0.5 else C(255, 245, 240)
-            for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
-                atlas.px(fx + dx, fy + dy, col)
-            atlas.px(fx, fy, C(250, 140, 40))
-    elif cid == "schoolboy":
-        atlas.rect(x + 5, y, 2, 2, C(210, 214, 220))
-        atlas.rect(x + 9, y, 2, 2, C(210, 214, 220))
-        for k in (4, 7, 10, 13):
-            atlas.px(x + 8, y + k, C(170, 176, 186))
-        atlas.rect(x + 10, y + 4, 3, 3, C(40, 70, 170))         # school badge
-        atlas.px(x + 11, y + 5, C(250, 210, 60))
-    elif cid == "office_lady":
-        atlas.rect(x + 5, y, 6, h, C(246, 246, 250))           # blouse between the lapels
-        for k in range(5):
-            atlas.px(x + 5 + k // 2, y + 5 + k, top)
-            atlas.px(x + 10 - k // 2, y + 5 + k, top)
-        atlas.rect(x + 4, y, 1, 9, C(200, 40, 50))              # lanyard + pass
-        atlas.rect(x + 11, y, 1, 9, C(200, 40, 50))
-        atlas.rect(x + 6, y + 9, 4, 5, C(250, 250, 250))
-        atlas.rect(x + 7, y + 10, 2, 2, C(60, 120, 200))
-    elif cid == "grandpa":
-        atlas.rect(x + 4, y, 8, 2, _pc(p["top"], 0.75))         # collar
-        atlas.rect(x + 7, y + 2, 2, 5, _pc(p["top"], 0.85))     # placket
-        atlas.px(x + 7, y + 3, C(245, 245, 240))
-        atlas.px(x + 7, y + 5, C(245, 245, 240))
-        atlas.rect(x + 11, y + 4, 2, 2, C(250, 220, 80))         # little logo
-    elif cid == "teen_girl":
-        atlas.ellipse(x + 8, y, 3, 2, skin)
-        for dx, dy in ((-2, 0), (-1, -1), (0, 0), (1, -1), (2, 0), (-2, 1), (2, 1),
-                       (-1, 2), (1, 2), (0, 3), (-1, 0), (0, 1), (1, 0), (-1, 1), (1, 1), (0, 2)):
-            atlas.px(x + 8 + dx, y + 8 + dy, C(240, 90, 150))
-    elif cid == "worker":
-        grey = _pc("c_work_grey")
-        atlas.rect(x + 5, y, 6, 3, grey)                        # shirt at the neck
-        for sy in (8, 12):                                      # reflective strips
-            atlas.rect(x, y + sy, w, 2, C(230, 236, 200))
-        atlas.rect(x + 7, y + 3, 1, 13, C(120, 60, 10))          # zip
-    elif cid == "grandma":
-        atlas.rect(x + 4, y, 8, 2, _pc(p["top"], 0.7))          # mandarin collar
-        for _ in range(10):
-            atlas.px(x + r.randrange(0, 16), y + r.randrange(2, 16), C(245, 248, 255))
-        for k in range(4):                                      # frog buttons, diagonal
-            atlas.rect(x + 8 + k * 2, y + 3 + k * 3, 2, 1, C(250, 250, 250))
-    atlas.noise(x, y, w, h, 0.06, 11)
+def paint_hair(cid, p, x, y, w, h):
+    """Row 0 = crown, last row = the hair's lower edge. Strands down, a shine band, darker tips."""
+    hair = p["hair"]
+    for i in range(w):
+        for j in range(h):
+            k = 1.12 - 0.3 * j / h
+            if i % 3 == 0:
+                k *= 0.88                                        # strands
+            if 4 <= j <= 5 and i % 3 != 0:
+                k *= 1.15                                        # shine band
+            people.px(x + i, y + j, _cc(hair, k))
+    if p["hair_style"] == "perm":                                # curls
+        r = random.Random(cid)
+        for _ in range(40):
+            people.px(x + r.randrange(w), y + r.randrange(h), _cc(hair, 1.5 if sum(hair) < 200 else 0.8))
+
+
+def paint_limb(cid, p, part, x, y, w, h):
+    """Row 0 = shoulder / hip, last row = hand tip / sole."""
+    skin = SKIN[p["skin"]]
+    for i in range(w):
+        sh = _wrap_shade(w, i, 1.04, 0.86)
+        for j in range(h):
+            if part == "arm":
+                sleeve_end = round((ARM_Z[1] - SLEEVE_Z[p["sleeves"]]) / (ARM_Z[1] - ARM_Z[0]) * h)
+                if j < sleeve_end:
+                    col = p.get("sleeve_col", p["top"])
+                    if p["pattern"] == "jacket" and j >= sleeve_end - 2:
+                        col = (250, 250, 252)                    # white cuffs (ref 07)
+                    k = 1.04 - 0.2 * j / sleeve_end
+                else:
+                    col, k = skin, 0.9                           # bare arms in the sun read paler than the face
+            else:
+                knee = 9 if p["lower"] == "shorts" else 21
+                if j < knee:
+                    col, k = p["bottom"], 1.0 - 0.18 * j / knee
+                elif j < 21:
+                    col, k = skin, 1.0
+                elif j < 22 and p["socks"]:
+                    col, k = p["socks"], 1.0
+                else:
+                    col, k = p["shoe"], 1.0
+                if j >= 22:
+                    col = p["shoe"]
+            people.px(x + i, y + j, _cc(col, sh * k))
+    if part == "leg":
+        people.rect(x, y + h - 1, w, 1, _cc(p["shoe"], 0.6))     # sole
 
 
 def paint_floor_and_walls():
@@ -751,9 +990,9 @@ class Builder:
     def pop(self):
         self.stack.pop()
 
-    def at(self, pos, rot_z=0.0, rot_x=0.0):
+    def at(self, pos, rot_z=0.0, rot_x=0.0, rot_y=0.0):
         self.push(Matrix.Translation(Vector(pos)) @ Matrix.Rotation(math.radians(rot_z), 4, "Z")
-                  @ Matrix.Rotation(math.radians(rot_x), 4, "X"))
+                  @ Matrix.Rotation(math.radians(rot_x), 4, "X") @ Matrix.Rotation(math.radians(rot_y), 4, "Y"))
         return self
 
     def __enter__(self):
@@ -783,6 +1022,12 @@ class Builder:
                 ua = (w[1] - w[0]).normalized()
                 va = (w[-1] - w[0]).normalized()
                 uv = [(p.dot(ua) / tile, p.dot(va) / tile) for p in w]
+        elif isinstance(look, tuple) and look[0] == "puv":    # people texture, texel coords per vertex
+            uv = [(px / PEOPLE_W, 1 - py / PEOPLE_H) for px, py in look[1]]
+        elif isinstance(look, tuple) and look[0] == "pcol":   # people texture, one solid texel
+            uv = [(look[1][0] / PEOPLE_W, 1 - look[1][1] / PEOPLE_H)] * len(pts)
+        elif look == ("whole",):                              # a quad showing its material's whole texture
+            uv = [(0, 0), (1, 0), (1, 1), (0, 1)]
         elif isinstance(look, tuple):
             rx, ry, rw, rh = REGIONS[look[1]]
             flip = len(look) > 2 and look[2]
@@ -842,10 +1087,13 @@ class Builder:
             if fname not in skip:
                 self.poly(pts, faces.get(fname, look))
 
-    def cyl(self, base, r_bot, r_top, h, look, segs=8, caps=(False, True), top_look=None, mat=None, inside=False):
-        """inside=True: the wall faces inwards (inner wall of a bowl or pot)."""
+    def cyl(self, base, r_bot, r_top, h, look, segs=8, caps=(False, True), top_look=None, mat=None, inside=False,
+            flute=0.0):
+        """inside=True: the wall faces inwards (inner wall of a bowl or pot). flute = every other
+        vertex pulled in by this fraction: fluted glass (ref 06)."""
         bx, by, bz = base
-        ring = [(math.cos(2 * math.pi * i / segs), math.sin(2 * math.pi * i / segs)) for i in range(segs)]
+        ring = [(math.cos(2 * math.pi * i / segs) * (1 - flute * (i % 2)),
+                 math.sin(2 * math.pi * i / segs) * (1 - flute * (i % 2))) for i in range(segs)]
         for i in range(segs):
             (c0, s0), (c1, s1) = ring[i], ring[(i + 1) % segs]
             if r_top <= 0.0001:
@@ -858,6 +1106,13 @@ class Builder:
             self.poly([(bx + c * r_top, by + s * r_top, bz + h) for c, s in ring], top_look or look, mat)
         if caps[0]:
             self.poly([(bx + c * r_bot, by + s * r_bot, bz) for c, s in reversed(ring)], look, mat)
+
+    def lathe(self, base, profile, look, segs=16, mat=None, inside=False, flute=0.0, cap=False):
+        """Surface of revolution through profile [(z, r), ...] bottom to top; cap = close the bottom."""
+        bx, by, bz = base
+        for k, ((z0, r0), (z1, r1)) in enumerate(zip(profile, profile[1:])):
+            self.cyl((bx, by, bz + z0), r0, r1, z1 - z0, look, segs, caps=(cap and k == 0, False), mat=mat,
+                     inside=inside, flute=flute)
 
     def dome(self, base, r, h, look, segs=8, rings=3):
         """Shaved-ice style mound: stacked rings closing to a point."""
@@ -896,7 +1151,8 @@ class Builder:
 
 
 PREVIEW = {"atlas": (0.8, 0.8, 0.8), "glow": (1, 1, 1), "floor": (0.3, 0.3, 0.32),
-           "walltile": (0.9, 0.9, 0.9), "glass": (0.7, 0.9, 1.0), "bowlglass": (0.6, 0.88, 0.92)}
+           "walltile": (0.9, 0.9, 0.9), "glass": (0.7, 0.9, 1.0), "bowlglass": (0.6, 0.88, 0.92),
+           "people": (0.85, 0.7, 0.6), "menu": (1, 1, 1)}
 
 
 def get_material(name):
@@ -926,16 +1182,31 @@ BENCH_Z = 0.93
 SHAVER = (-0.02, 1.6)               # base centre; the bowl sits on the base under the drum
 BOWL_STACK = (0.32, 1.5)
 ICE_TRAY = (-0.37, 1.83)            # plain + milk ice blocks, behind the first tubs
-TUB_X0, TUB_DX = -0.42, -0.13       # 4 x 2 topping tubs, slot = row * 4 + col
-TUB_Y = (1.45, 1.61)
-SAUCE_X0, SAUCE_DX, SAUCE_Y = -0.56, -0.085, 1.86
+TUB_X0, TUB_DX = -0.42, -0.13       # topping tubs in rows of 4, slot = row * 4 + col
+TUB_Y = (1.45, 1.61)                # back, front (slots 0-7); the soup toppings (8-10) sit in the soup corner
+JAR_X0, JAR_DX, JAR_Y = -0.3, -0.112, 1.24   # M17 fruit jars on the back strip, slot = left to right
+SAUCE_X0, SAUCE_DX, SAUCE_Y = -0.56, -0.08, 1.86   # M25: 7 containers; the last clears the soup bowl spot
 BIN = (0.32, 1.8)                   # scrap pail, front left
-# Soup corner at the right end of the bench (M6): pot on a burner at the back, you tiao plate
-# between the tubs and the pot, soup bowls front right, the bowl being filled in front of the pot.
-SOUP_POT = (-1.25, 1.52)
-YOU_TIAO = (-0.98, 1.44)
-SOUP_SPOT = (-1.0, 1.7)
-SOUP_BOWLS = (-1.24, 1.84)
+# Soup corner at the right end of the bench (M6, moved right in M17 for the jar row): the warmer on
+# the back strip, the soup topping tubs in front of it, the pot on a burner at the far right, the
+# bowl being filled in front of the tubs, you tiao plate and soup bowls front right.
+SOUP_POT = (-1.5, 1.48)
+SOUP_TUBS = (-0.95, -0.12, 1.56)    # x of slot 8, step, y
+YOU_TIAO = (-1.31, 1.8)
+SOUP_SPOT = (-1.12, 1.74)
+SOUP_BOWLS = (-1.53, 1.84)
+# M18: six-well warmer on the back strip, a stepped box (back row raised so the front lids don't
+# hide it). Rows seen from the camera, screen left to right; +X = screen left, -Y = back.
+WARMER = (-1.12, 1.29)
+WARMER_HALF = (0.18, 0.115)         # x, y half sizes
+WARMER_H = (0.08, 0.15)             # top of the front and back row
+# M24: each well's name in 1-2 big words ("|" = new line) on a board as wide as the well pitch
+WELLS = (("chacha_soup", 0.12, -0.055, "BOBO"), ("pulut_soup", 0.0, -0.055, "PULUT"),
+         ("cheng_tng_soup", -0.12, -0.055, "CHENG|TNG"), ("sweet_potato_soup", 0.12, 0.06, "POTATO"),
+         ("red_bean_soup", 0.0, 0.06, "RED|BEAN"), ("green_bean_soup", -0.12, 0.06, "GREEN|BEAN"))
+TAG = (0.112, 0.063)                # name board width, height (front row: just under the 0.07 step)
+TAG_TEX = (32, 18)                  # its atlas cell, so a texel is 3.5 mm square
+WELL_R = 0.05                       # game: station.gd taps a well within 0.065
 BOWL_R = 0.12                       # glass bowl rim radius (game: scripts/making/bowl.gd)
 SOUP_R = 0.1                        # soup bowl rim radius (game: Bowl.SOUP_*)
 SERVE_TRAY = (-0.5, 0.55)           # on top of the display case (z 1.34)
@@ -944,8 +1215,28 @@ SERVE_TRAY = (-0.5, 0.55)           # on top of the display case (z 1.34)
 # FOV lives in scripts/stall.gd (VIEW_FOV); keep it in sync with the preview render here.
 CAMERAS = {
     "waiting": ((0.0, -5.4, 2.0), (0.0, 0.0, 1.45), 46),
-    "making": ((-0.45, 2.55, 1.95), (-0.45, 1.3, 1.0), 50),
+    "making": ((-0.62, 2.68, 2.03), (-0.62, 1.3, 1.02), 50),  # M17: pulled back for the wider bench
 }
+
+
+# Footed dessert cup after ref 06: flat foot, short stem, rounded fluted bowl, blue rim. The top of
+# the rim is at 0.105 (Bowl.RIM_Y in scripts/making/bowl.gd), rim radius BOWL_R.
+CUP_OUTER = [(0.034, 0.03), (0.042, 0.06), (0.056, 0.088), (0.075, 0.108), (0.095, BOWL_R)]
+CUP_INNER = [(0.046, 0.05), (0.058, 0.08), (0.076, 0.103), (0.095, BOWL_R - 0.005)]
+
+
+def glass_cup(b, base, inner=True, segs=16):
+    bx, by, bz = base
+    b.cyl((bx, by, bz), 0.066, 0.06, 0.01, "glass_foot", segs=segs, caps=(True, True))         # foot
+    b.cyl((bx, by, bz + 0.01), 0.024, 0.03, 0.024, "glass_foot", segs=segs, caps=(False, False))  # stem
+    # see-through walls (own "bowlglass" material) so the ice inside shows; fluted outside
+    b.lathe(base, CUP_OUTER, "bowl_glass", segs=segs, mat="bowlglass", flute=0.07, cap=True)
+    if inner:
+        b.lathe(base, CUP_INNER, "bowl_glass", segs=segs, mat="bowlglass", inside=True)
+    # opaque blue rim keeps the outline readable
+    b.cyl((bx, by, bz + 0.095), BOWL_R, BOWL_R + 0.002, 0.01, "bowl_rim", segs=segs, caps=(False, False))
+    b.cyl((bx, by, bz + 0.095), BOWL_R - 0.005, BOWL_R - 0.005, 0.01, "bowl_rim", segs=segs, caps=(False, False),
+          inside=True)
 
 
 def build_hall(b):
@@ -1008,10 +1299,11 @@ def build_unit_shell(b, x0, sign, menu, sign_col):
     # lightbox menu, hanging and tilted down towards customers
     if menu:
         cx = (x0 + x1) / 2
-        with b.at((cx, 0.1, 2.27), rot_x=-12):
+        # ours is taller (2 rows, own texture), growing downwards: the fascia is right above
+        hh, face = (0.375, [("whole",), "menu"]) if menu == "menu_ours" else (0.28, [("region", menu), "glow"])
+        with b.at((cx, 0.1, 2.55 - hh), rot_x=-12):
             hw = UNIT_W / 2 - 0.3
-            b.box((-hw, -0.05, -0.28), (hw, 0.05, 0.28), "lightbox_back",
-                  faces={"front": [("region", menu), "glow"]})
+            b.box((-hw, -0.05, -hh), (hw, 0.05, hh), "lightbox_back", faces={"front": face})
         b.box((cx - 0.8, 0.1, 2.52), (cx - 0.78, 0.12, INNER_CEIL), "steel_dark")
         b.box((cx + 0.78, 0.1, 2.52), (cx + 0.8, 0.12, INNER_CEIL), "steel_dark")
 
@@ -1071,6 +1363,8 @@ def build_our_stall(b):
     # --- work bench behind the display: where the uncle makes desserts ---
     b.box((-1.95, 1.35, 0), (0.45, 1.95, 0.9), "steel", skip=("bottom",))
     b.box((-1.97, 1.33, 0.9), (0.47, 1.97, 0.93), "tub_steel")
+    b.box((-1.68, 1.17, 0), (-0.25, 1.35, 0.9), "steel", skip=("bottom", "back"))      # back strip (M13, M17)
+    b.box((-1.7, 1.15, 0.9), (-0.23, 1.33, 0.93), "tub_steel", skip=("back",))
 
     # --- back wall: glass drinks fridge, chest freezer, shelves of stock, clock ---
     b.box((1.15, 2.35, 0), (2.0, 2.95, 1.75), "white",
@@ -1180,50 +1474,45 @@ def build_props():
 
     # The working bowl (one at a time; the game moves it around and fills it).
     b = Builder()
-    # Tinted see-through walls (outer + inner, own "bowlglass" material) so the ice inside
-    # shows; an opaque bright rim and a solid teal foot keep the outline readable.
-    b.cyl((0, 0, 0), 0.045, 0.045, 0.03, "glass_foot", segs=8, caps=(True, True))
-    # walls ~29 deg off vertical: the making camera looks down at ~45 deg, so a flatter flare
-    # would turn the outside of the glass away from it and only the rim would show
-    b.cyl((0, 0, 0.03), 0.088, BOWL_R, 0.063, "bowl_glass", segs=10, caps=(True, False), mat="bowlglass")
-    b.cyl((0, 0, 0.034), 0.083, BOWL_R - 0.005, 0.059, "bowl_glass", segs=10, caps=(False, False),
-          mat="bowlglass", inside=True)
-    b.cyl((0, 0, 0.093), BOWL_R, BOWL_R, 0.012, "glass_rim", segs=10, caps=(False, False))
-    b.cyl((0, 0, 0.093), BOWL_R - 0.006, BOWL_R - 0.006, 0.012, "glass_rim", segs=10, caps=(False, False),
-          inside=True)
+    glass_cup(b, (0, 0, 0))
     objs.append(b.to_object("bowl"))
-    # The soup bowl: white with a blue rim, open so the soup inside shows (Godot draws the soup).
+    # The soup bowl, in the cups' style: rounded white porcelain on a foot ring, a thick blue rim
+    # and a thin blue band below it. Open so the soup inside shows (Godot draws the soup).
     b = Builder()
-    b.cyl((0, 0, 0), 0.045, 0.045, 0.02, "bowl_white", segs=10, caps=(True, False))
-    b.cyl((0, 0, 0.02), 0.055, SOUP_R, 0.06, "bowl_white", segs=10, caps=(False, False))
-    b.cyl((0, 0, 0.074), SOUP_R, SOUP_R, 0.008, "bowl_rim", segs=10, caps=(False, False))
-    b.cyl((0, 0, 0.028), 0.05, SOUP_R - 0.006, 0.054, "offwhite", segs=10, caps=(False, False), inside=True)
-    b.cyl((0, 0, 0.026), 0.05, 0.05, 0.002, "offwhite", segs=10)
+    b.cyl((0, 0, 0), 0.042, 0.045, 0.014, "bowl_rim", segs=14, caps=(True, False))
+    b.lathe((0, 0, 0), [(0.014, 0.048), (0.03, 0.074), (0.05, 0.091), (0.06, 0.097)], "bowl_white", segs=14)
+    b.cyl((0, 0, 0.06), 0.097, 0.099, 0.006, "bowl_rim", segs=14, caps=(False, False))
+    b.cyl((0, 0, 0.066), 0.099, SOUP_R, 0.008, "bowl_white", segs=14, caps=(False, False))
+    b.cyl((0, 0, 0.074), SOUP_R, SOUP_R + 0.002, 0.008, "bowl_rim", segs=14, caps=(False, False))
+    b.lathe((0, 0, 0), [(0.026, 0.05), (0.05, 0.085), (0.082, SOUP_R - 0.004)], "offwhite", segs=14, inside=True)
+    b.cyl((0, 0, 0.024), 0.05, 0.05, 0.002, "offwhite", segs=14)
     objs.append(b.to_object("soup_bowl"))
 
     # Everything fixed on the bench, merged: bowl stacks, ice tray, tubs, bin, soup corner.
     b = Builder()
     bx, by = BOWL_STACK
-    for k in range(4):
-        b.cyl((bx, by, z + k * 0.05), 0.095, BOWL_R, 0.04, "bowl_glass", segs=8, caps=(k == 0, False),
-              mat="bowlglass")
-        b.cyl((bx, by, z + k * 0.05 + 0.04), BOWL_R, BOWL_R, 0.01, "glass_rim", segs=8, caps=(False, False))
-        if k == 3:
-            b.cyl((bx, by, z + k * 0.05 + 0.004), 0.09, BOWL_R - 0.005, 0.047, "bowl_glass", segs=8,
-                  caps=(False, False), mat="bowlglass", inside=True)
+    # stack of cups, upper ones standing in the ones below (only the top one has its inside)
+    for k in range(3):
+        glass_cup(b, (bx, by, z + k * 0.045), inner=k == 2, segs=12)
     marker("mk_bowl_stack", (bx, by, z + 0.12))
     bx, by = SOUP_BOWLS
-    for k in range(4):
-        b.cyl((bx, by, z + k * 0.045), 0.055, SOUP_R, 0.045, "bowl_white", segs=8, caps=(False, k == 3))
-        b.cyl((bx, by, z + k * 0.045 + 0.039), SOUP_R, SOUP_R, 0.006, "bowl_rim", segs=8, caps=(False, False))
+    for k in range(4):     # same style as the soup bowl: rounded white, thick blue rim
+        b.lathe((bx, by, z + k * 0.04), [(0.0, 0.05), (0.015, 0.078), (0.032, 0.096)], "bowl_white", segs=12)
+        b.cyl((bx, by, z + k * 0.04 + 0.032), 0.096, SOUP_R + 0.002, 0.008, "bowl_rim", segs=12,
+              caps=(False, k == 3), top_look="bowl_white")
     marker("mk_soup_stack", (bx, by, z + 0.1))
     marker("mk_soup_spot", (SOUP_SPOT[0], SOUP_SPOT[1], z))
-    # you tiao on a small steel plate: three long golden sticks
+    # you tiao on a white tray with a raised blue rim (round 9: the steel plate vanished into the
+    # counter): three long golden sticks. Half sizes keep it clear of the soup spot and bowl stack.
     yx, yy = YOU_TIAO
-    b.box((yx - 0.05, yy - 0.08, z), (yx + 0.05, yy + 0.08, z + 0.012), "tub_steel", skip=("bottom",))
+    hx, hy, rim = 0.07, 0.095, 0.008
+    b.box((yx - hx, yy - hy, z), (yx + hx, yy + hy, z + 0.008), "bowl_white", skip=("bottom",))
+    for x0, y0, x1, y1 in ((-hx, -hy, hx, -hy + rim), (-hx, hy - rim, hx, hy),
+                           (-hx, -hy + rim, -hx + rim, hy - rim), (hx - rim, -hy + rim, hx, hy - rim)):
+        b.box((yx + x0, yy + y0, z), (yx + x1, yy + y1, z + 0.02), "bowl_rim", skip=("bottom",))
     for k, dx in enumerate((-0.028, 0.0, 0.028)):
         look = "you_tiao" if k != 1 else "you_tiao_lt"
-        b.box((yx + dx - 0.012, yy - 0.065, z + 0.012), (yx + dx + 0.012, yy + 0.065, z + 0.034), look,
+        b.box((yx + dx - 0.012, yy - 0.065, z + 0.008), (yx + dx + 0.012, yy + 0.065, z + 0.03), look,
               skip=("bottom",))
     marker("mk_tub_you_tiao", (yx, yy, z + 0.04))
     # ice block tray: plain (left) and milk (right)
@@ -1233,12 +1522,22 @@ def build_props():
         b.box((ix + dx - 0.045, iy - 0.045, z + 0.02), (ix + dx + 0.045, iy + 0.045, z + 0.1), look,
               skip=("bottom",))
         marker("mk_ice_" + kind, (ix + dx, iy, z + 0.07))
-    # topping tubs, 4 x 2
+    # topping tubs, 4 x 2, then the soup toppings in a row in the soup corner
     for t in TOPPINGS:
         slot = INGREDIENTS[t]["slot"]
-        tx, ty = TUB_X0 + (slot % 4) * TUB_DX, TUB_Y[slot // 4]
+        if slot < 8:
+            tx, ty = TUB_X0 + (slot % 4) * TUB_DX, TUB_Y[slot // 4]
+        else:
+            tx, ty = SOUP_TUBS[0] + (slot - 8) * SOUP_TUBS[1], SOUP_TUBS[2]
         b.cyl((tx, ty, z), 0.06, 0.065, 0.08, "tub_steel", segs=8, top_look=("region", "tub_" + t))
         marker("mk_tub_" + t, (tx, ty, z + 0.08))
+    # fruit jars: the fruit in its syrup inside a glass jar with a steel neck ring
+    for f in FRUITS:
+        jx, jy = JAR_X0 + INGREDIENTS[f]["slot"] * JAR_DX, JAR_Y
+        b.cyl((jx, jy, z), 0.047, 0.047, 0.1, ("region", "jarside_" + f), segs=8, top_look=("region", "jar_" + f))
+        b.cyl((jx, jy, z), 0.053, 0.053, 0.12, "bowl_glass", segs=8, caps=(True, False), mat="bowlglass")
+        b.cyl((jx, jy, z + 0.12), 0.053, 0.055, 0.012, "steel", segs=8, caps=(False, False))
+        marker("mk_tub_" + f, (jx, jy, z + 0.1))
     # scrap pail for binning a bowl
     px_, py_ = BIN
     b.cyl((px_, py_, z), 0.08, 0.1, 0.16, "bin_red", segs=10, top_look="pot_inner")
@@ -1253,7 +1552,8 @@ def build_props():
         sx_ = SAUCE_X0 + info["slot"] * SAUCE_DX
         b = Builder()
         if info["container"] == "bottle":
-            col = {"rose": "bottle_red", "mango_sauce": "bottle_orange", "gula_melaka": "bottle_brown"}[s]
+            col = {"rose": "bottle_red", "green_syrup": "bottle_green", "mango_sauce": "bottle_orange",
+                   "gula_melaka": "bottle_brown"}[s]
             b.cyl((0, 0, 0), 0.035, 0.035, 0.15, col, segs=6, caps=(True, False))
             b.cyl((0, 0, 0.15), 0.035, 0.012, 0.05, col, segs=6, caps=(False, False))
             b.cyl((0, 0, 0.2), 0.012, 0.012, 0.025, "white", segs=5)
@@ -1283,7 +1583,29 @@ def build_props():
         b.box((px_ + sx * 0.14 - 0.02, py_ - 0.03, z + 0.22), (px_ + sx * 0.14 + 0.02, py_ + 0.03, z + 0.24),
               "steel_dark")
     objs.append(b.to_object("soup_pot", origin=(px_, py_, z)))
-    marker("mk_pot", (px_, py_, z + 0.27))
+    marker("mk_pot_tau_suan_soup", (px_, py_, z + 0.27))
+    # six-well warmer: a stepped steel box, each well a sunken soup surface with a steel rim and
+    # its lid propped open behind it, the soup's name on the lid
+    b = Builder()
+    wx, wy = WARMER
+    hx, hy = WARMER_HALF
+    b.box((wx - hx, wy, z), (wx + hx, wy + hy, z + WARMER_H[0]), "steel", skip=("bottom",), faces={"top": "steel_dark"})
+    b.box((wx - hx, wy - hy, z), (wx + hx, wy, z + WARMER_H[1]), "steel", skip=("bottom",), faces={"top": "steel_dark"})
+    for soup, dx, dy, _label in WELLS:
+        top = z + WARMER_H[0 if dy > 0 else 1]
+        cx, cy = wx + dx, wy + dy
+        b.cyl((cx, cy, top), WELL_R, WELL_R, 0.001, ("region", "well_" + soup), segs=10)
+        b.cyl((cx, cy, top), WELL_R, WELL_R + 0.006, 0.008, "steel", segs=10, caps=(False, False))
+        # lid: hinged at the back edge of the well; the back row's leans back, the front row's
+        # stands up against the step
+        # (M24: the back row leans back 36 deg, so its board faces the camera square on)
+        hinge = cy - WELL_R - 0.008 if dy < 0 else wy + 0.008
+        tw, th = TAG
+        with b.at((cx, hinge, top), rot_x=36 if dy < 0 else 0):
+            b.box((-tw / 2 - 0.002, -0.006, 0), (tw / 2 + 0.002, 0.0, th + 0.004), "steel")
+            b.box((-tw / 2, 0.0, 0.002), (tw / 2, 0.002, th + 0.002), "steel", faces={"back": ("region", "lid_" + soup)})
+        marker("mk_pot_" + soup, (cx, cy, top + 0.04))
+    objs.append(b.to_object("soup_warmer", origin=(wx, wy, z)))
     b = Builder()
     b.cyl((0, 0, 0), 0.025, 0.04, 0.03, "steel", segs=8, caps=(True, False))
     b.cyl((0, 0, 0.002), 0.025, 0.037, 0.028, "steel_dark", segs=8, caps=(False, False), inside=True)
@@ -1354,6 +1676,35 @@ CUST_HIP = 0.8
 CUST_NECK = 1.42
 
 
+def wrap_lathe(b, rings, rect, zr, segs=8, skip=None, cap=None):
+    """Faceted surface through rings [(z, rx, ry, cy), ...] bottom to top, textured with the people
+    texture rect (x, y, w, h) wrapped round it: u = once round, front (-Y) in the middle; v = z
+    over zr (low, high), high at the top row. skip(i, k) leaves out facet i of band k (from the
+    bottom). cap = people texel (x, y) to close the top with, or None."""
+    x, y, w, h = rect
+    z_lo, z_hi = zr
+
+    def pt(ring, i):
+        z, rx, ry, cy = ring
+        a = -math.pi / 2 + (i / segs - 0.5) * 2 * math.pi
+        return (rx * math.cos(a), cy + ry * math.sin(a), z)
+
+    def tex(i, z):
+        return (x + w * i / segs, y + h * (z_hi - z) / (z_hi - z_lo))
+
+    for k, (r0, r1) in enumerate(zip(rings, rings[1:])):
+        for i in range(segs):
+            if skip and skip(i, k):
+                continue
+            pts = [pt(r0, i), pt(r0, i + 1), pt(r1, i + 1), pt(r1, i)]
+            uvs = [tex(i, r0[0]), tex(i + 1, r0[0]), tex(i + 1, r1[0]), tex(i, r1[0])]
+            if r1[1] < 1e-4:                     # closes to a point
+                pts, uvs = pts[:3], [uvs[0], uvs[1], ((uvs[0][0] + uvs[1][0]) / 2, uvs[2][1])]
+            b.poly(pts, ("puv", uvs), mat="people")
+    if cap is not None and rings[-1][1] > 1e-4:
+        b.poly([pt(rings[-1], i) for i in range(segs)], ("pcol", cap), mat="people")
+
+
 def build_customers():
     """Customer templates, parked far behind the stall (y 30) where no camera sees them; the game
     copies them. Each is an empty cust_<id> at the feet with parts cust_<id>_body/head/leg_l/leg_r.
@@ -1371,87 +1722,81 @@ def build_customer(cid, p, pos):
     root.location = pos
     base = Matrix.Translation(pos) @ Matrix.Scale(s, 4)
     pivot = lambda local: pos + Vector(local) * s
-    top, bottom, skin, hair = p["top"], p["bottom"], p["skin"], p["hair"]
-    sleeve = p.get("sleeves", top)
-    extra = p.get("extra", ())
+    rect = lambda part: people_rect(cid, part)
+    cell = lambda name: ("pcol", people_cell(cid, name))
     hip, neck = CUST_HIP, CUST_NECK
+    jacket = p["pattern"] in ("jacket", "hivis")
 
+    # body: tapered torso (wider hem for jackets) with a shoulder ring that overhangs the arm
+    # tops, neck, arms
     b = Builder()
     b.push(base)
-    if p["lower"] == "skirt":
-        b.frustum(0.5, 0.9, 0.38, 0.26, 0.33, 0.21, bottom)
-    else:
-        b.box((-0.17, -0.1, 0.72), (0.17, 0.1, 0.9), bottom)
-    b.frustum(0.88, neck, 0.34, 0.2, 0.38, 0.22, top,
-              faces={"front": ("region", "cfront_" + cid)})
-    b.cyl((0, 0, neck - 0.02), 0.05, 0.05, 0.06, skin, segs=6, caps=(False, False))
-    for sx in (-1, 1):
-        lo, hi = sorted((sx * 0.19, sx * 0.265))
-        cuff = 0.86 if p.get("long") else 1.12
-        b.box((lo, -0.055, cuff), (hi, 0.055, neck - 0.01), sleeve)
-        if cuff > 0.9:
-            b.box((lo + 0.006, -0.045, 0.86), (hi - 0.006, 0.045, cuff), skin)
-        b.box((lo + 0.004, -0.05, 0.77), (hi - 0.004, 0.04, 0.86), p["skin"])          # hand
-    if "backpack" in extra:
-        b.box((-0.15, 0.11, 0.92), (0.15, 0.27, 1.34), "c_backpack")
-        b.box((-0.11, 0.27, 0.98), (0.11, 0.3, 1.15), "c_navy")                    # front pocket
-        for sx in (-0.11, 0.08):
-            b.box((sx, -0.125, 1.1), (sx + 0.03, -0.11, neck - 0.01), "c_backpack")  # straps
-    if "handbag" in extra:
-        b.box((0.265, -0.07, 0.86), (0.33, 0.07, 1.04), "c_bag")
-        b.box((0.27, -0.01, 1.04), (0.28, 0.01, 1.3), "c_bag")
+    hem = 0.19 if jacket else 0.165
+    wrap_lathe(b, [(0.72, hem, hem * 0.68, 0.0), (0.9, 0.16, 0.105, 0.0), (1.12, 0.165, 0.11, 0.0),
+                   (1.3, 0.185, 0.115, 0.0), (1.365, 0.232, 0.112, 0.0), (1.415, 0.12, 0.075, 0.0),
+                   (1.44, 0.05, 0.05, 0.0)],
+               rect("torso"), TORSO_Z, segs=8)
+    # arm: round, tapering to the elbow and wrist, a small rounded hand; the forearm bends a
+    # little forward (-Y). Its open top sits just under the torso's shoulder ring, so the
+    # shoulder line runs straight into the arm with no bump. The sleeve is the arm plus a
+    # little, stepping out at the cuff (short sleeves flare more).
+    cuff = SLEEVE_Z[p["sleeves"]]
+    loose = 0.012 if cuff > -0.5 else 0.006
+    bend = math.tan(math.radians(7))
+
+    def radius(z):
+        for (z0, r0), (z1, r1) in zip(ARM_PROFILE, ARM_PROFILE[1:]):
+            if z0 <= z <= z1:
+                return r0 + (r1 - r0) * (z - z0) / (z1 - z0)
+
+    def ring(z, r):
+        return (z, r, r * 0.94, min(0.0, (z - ARM_ELBOW) * bend))
+
+    arm = [ring(z, r) for z, r in ARM_PROFILE if z < cuff]
+    arm += [ring(cuff, radius(cuff)), ring(cuff + 0.004, radius(cuff) + loose)]
+    arm += [ring(z, r + loose) for z, r in ARM_PROFILE if z > cuff + 0.004]
+    for side in (-1, 1):
+        with b.at((side * 0.175, 0, 1.355), rot_y=-side * 4):  # hangs a little out from the hips
+            wrap_lathe(b, arm, rect("arm"), ARM_Z, segs=10)
+    if "backpack" in p.get("extras", ()):
+        b.box((-0.14, 0.11, 0.92), (0.14, 0.27, 1.32), cell("extra"), mat="people")
+        b.box((-0.1, 0.27, 0.98), (0.1, 0.3, 1.14), cell("extra2"), mat="people")
+    if "handbag" in p.get("extras", ()):
+        b.box((0.28, -0.07, 0.84), (0.35, 0.07, 1.02), cell("extra"), mat="people")
+        b.box((0.295, -0.01, 1.02), (0.305, 0.01, 1.3), cell("extra2"), mat="people")
     b.to_object("cust_%s_body" % cid, origin=pos, parent=root)
 
+    # head + hair helmet (fringe over the forehead, open over the face)
     b = Builder()
     b.push(base)
-    with b.at((0, 0, neck + 0.02)):
-        b.frustum(0.0, 0.24, 0.22, 0.22, 0.21, 0.21, skin,
-                  faces={"front": ("region", "cface_" + cid), "top": hair, "back": hair})
-        b.box((-0.125, -0.02, 0.08), (-0.105, 0.04, 0.14), _shade_name(skin))      # ears
-        b.box((0.105, -0.02, 0.08), (0.125, 0.04, 0.14), _shade_name(skin))
+    with b.at((0, 0, neck)):
+        wrap_lathe(b, [(0.0, 0.035, 0.035, 0.0), (0.05, 0.072, 0.08, -0.008), (0.11, 0.104, 0.106, 0.0),
+                       (0.18, 0.114, 0.114, 0.0), (0.25, 0.1, 0.1, 0.004), (0.3, 0.05, 0.05, 0.008)],
+                   rect("head"), HEAD_Z, segs=8, cap=people_cell(cid, "hair"))
         style = p["hair_style"]
+        low, puff = {"short": (0.13, 0.014), "hardhat": (0.13, 0.012), "perm": (0.07, 0.034),
+                     "bob": (-0.01, 0.024)}[style]
+        rings = [(low, 0.104 + puff + (0.012 if style == "bob" else 0.0), 0.106 + puff, 0.004),
+                 (0.2, 0.114 + puff, 0.114 + puff, 0.004), (0.27, 0.1 + puff, 0.1 + puff, 0.008),
+                 (0.33 + puff * 0.6, 0.0, 0.0, 0.01)]
+        face = lambda i: i in (3, 4)            # the two front facets of 8
+        wrap_lathe(b, rings, rect("hair"), (low, 0.35), segs=8, skip=lambda i, k: k == 0 and face(i))
         if style == "hardhat":
-            b.cyl((0, 0, 0.19), 0.135, 0.1, 0.1, "c_hardhat", segs=8)
-            b.box((-0.145, -0.18, 0.18), (0.145, 0.15, 0.205), "c_hardhat")      # brim
-        elif style == "perm":
-            b.box((-0.135, -0.12, 0.16), (0.135, 0.14, 0.31), hair)
-            for sx in (-1, 1):
-                lo, hi = sorted((sx * 0.108, sx * 0.135))
-                b.box((lo, -0.07, 0.05), (hi, 0.14, 0.17), hair)
-            b.box((-0.135, 0.11, 0.03), (0.135, 0.14, 0.17), hair)
-        else:
-            b.box((-0.115, -0.115, 0.2), (0.115, 0.115, 0.265), hair)
-            b.box((-0.115, 0.1, 0.06 if style == "short" else 0.0), (0.115, 0.122, 0.22), hair)
-            if style == "bun":
-                b.box((-0.05, 0.1, 0.2), (0.05, 0.19, 0.3), hair)
-            elif style == "ponytail":
-                b.box((-0.035, 0.12, -0.02), (0.035, 0.175, 0.24), hair)
-                b.box((-0.04, 0.115, 0.2), (0.04, 0.17, 0.235), "c_backpack")     # hair tie
+            wrap_lathe(b, [(0.19, 0.165, 0.18, -0.025), (0.205, 0.135, 0.135, 0.0), (0.28, 0.13, 0.13, 0.0),
+                           (0.34, 0.1, 0.1, 0.0), (0.37, 0.0, 0.0, 0.0)],
+                       (*people_cell(cid, "hat"), 0, 0), (0.19, 0.37), segs=8)   # solid colour
     b.to_object("cust_%s_head" % cid, origin=pivot((0, 0, neck)), parent=root)
 
+    # legs: tapered, shoe pushed forward at the bottom
     for side, nm in ((-1, "leg_r"), (1, "leg_l")):
         b = Builder()
         b.push(base)
         lx = side * 0.085
         with b.at((lx, 0, 0)):
-            if p["lower"] == "pants":
-                b.box((-0.062, -0.062, 0.06), (0.062, 0.062, hip), bottom)
-            elif p["lower"] == "shorts":
-                b.box((-0.066, -0.066, 0.52), (0.066, 0.066, hip), bottom)
-                b.box((-0.048, -0.048, 0.06), (0.048, 0.048, 0.52), skin)
-            else:   # skirt hides the top of the leg
-                b.box((-0.045, -0.045, 0.06), (0.045, 0.045, 0.62), skin)
-            if p["shoes"] == "slipper":
-                b.box((-0.06, -0.13, 0.0), (0.06, 0.06, 0.025), "slipper")
-                b.box((-0.045, -0.11, 0.025), (0.045, 0.045, 0.06), skin)
-            else:
-                b.box((-0.06, -0.13, 0.0), (0.06, 0.065, 0.075), p["shoes"])
+            wrap_lathe(b, [(0.0, 0.056, 0.095, -0.03), (0.07, 0.054, 0.09, -0.028), (0.1, 0.04, 0.042, 0.0),
+                           (0.45, 0.05, 0.052, 0.0), (0.8, 0.078, 0.078, 0.0)],
+                       rect("leg"), LEG_Z, segs=6)
         b.to_object("cust_%s_%s" % (cid, nm), origin=pivot((lx, 0, hip)), parent=root)
-
-
-def _shade_name(skin):
-    """Ears: the next darker customer skin swatch (or uncle's skin_dark for the darkest)."""
-    return {"c_skin_lt": "c_skin_md", "c_skin_md": "c_skin_dk"}.get(skin, "skin_dark")
 
 
 def main():
@@ -1460,11 +1805,18 @@ def main():
     os.makedirs(os.path.dirname(OUT_GLB), exist_ok=True)
 
     paint_signboard()
-    paint_menu_lightbox()
+    paint_menu_lightbox()     # own texture, menu.png
     paint_neighbours()
     paint_props()
     paint_floor_and_walls()
-    paint_customers()
+    paint_people()
+    names = list(REGIONS)
+    for i, a in enumerate(names):          # painting over another region is always a mistake
+        ax, ay, aw, ah = REGIONS[a]
+        for bn in names[i + 1:]:
+            bx, by, bw, bh = REGIONS[bn]
+            if ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah:
+                print("REGION_OVERLAP", a, bn)
     atlas.save(os.path.join(TEX_DIR, "atlas.png"))
 
     b = Builder()
@@ -1540,7 +1892,7 @@ def render_previews():
     sc.collection.objects.link(cam)
     sc.camera = cam
     # plus a lineup of the customer templates (parked at y 30, front faces -Y)
-    lineup = {"customers": ((33.5, 22.0, 1.0), (33.5, 30.0, 0.85), 30)}
+    lineup = {"customers": ((32.5, 24.0, 1.0), (32.5, 30.0, 0.85), 22)}
     for view, (pos, target, fov) in {**CAMERAS, **lineup}.items():
         cam_data.angle_y = math.radians(fov)
         cam.location = pos

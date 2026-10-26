@@ -3,8 +3,9 @@ extends "res://scripts/customers/custtest.gd"
 ##   godot --headless --path . -- --daytest --savefile user://save_test.json --fresh
 ##   godot --headless --path . -- --daycheck --savefile user://save_test.json
 ## Run 1 plays a short day (2 customers) to the summary, checks the numbers and the autosave,
-## buys chendol in the shop with real clicks, starts day 2 and makes a chendol. Run 2 is a
-## restart: money, day and unlocks must come back from the save.
+## buys chendol, tau suan and the 5 post-v1 desserts in the shop with real clicks, starts day 2
+## and makes every bought dessert; then buys both upgrades and checks they make shaving and
+## ladling faster. Run 2 is a restart: money, day, unlocks and upgrades must come back.
 
 const EXPECT := "user://daytest_expect.json"
 const DAY_LEN := 2
@@ -14,6 +15,7 @@ func run(s: Node) -> void:
 	stall = s
 	st = s.station
 	q = s.queue
+	q.two_share = 0.0                # day 2 on could roll 2-dessert orders; custtest covers them
 	if "--daycheck" in OS.get_cmdline_user_args():
 		await _restart_restores()
 	else:
@@ -22,8 +24,10 @@ func run(s: Node) -> void:
 		await _fresh_start()
 		await _short_day()
 		await _shop()
+		await _buy_the_rest()
 		await _next_day()
-		await _make_chendol()
+		await _make_bought()
+		await _upgrades()
 		await _weather_and_mute()
 		_write_expect()
 	Engine.time_scale = 1.0
@@ -74,10 +78,22 @@ func _shop() -> void:
 	var p: DayPanel = stall.day_panel
 	await click(p.shop_button)
 	check(p._shop.visible and not p._summary.visible, "SHOP opens the shop page")
-	check(p.buy_buttons.keys() == ["chendol", "tau_suan"], "sells chendol and tau suan: %s" % [p.buy_buttons.keys()])
+	var sells := Game.shop_items()
+	var costs := sells.map(func(id): return Game.cost(id))
+	var sorted_costs := costs.duplicate()
+	sorted_costs.sort()
+	check(sells.size() == RecipeBook.makeable().size() - RecipeBook.makeable(true).size() and costs == sorted_costs
+		and p.buy_buttons.keys() == sells + ["big_ladle", "fast_shaver"],
+		"sells all %d, cheapest first, then the upgrades: %s" % [sells.size(), p.buy_buttons.keys()])
+	await get_tree().process_frame
+	var screen := p.get_global_rect()
+	var off := p.buy_buttons.keys().filter(func(id): return not screen.encloses(p.buy_buttons[id].get_global_rect()))
+	check(off.is_empty() and screen.encloses(p.shop_back_button.get_global_rect())
+		and screen.encloses(p._shop.get_global_rect()), "the whole shop fits the screen (off: %s)" % [off])
 	var b: Button = p.buy_buttons.get("chendol")
 	if b == null:
 		return
+	check(stall.board_lit("ice_kachang") and not stall.board_lit("chendol"), "lightbox: starters lit, chendol dark")
 	check(b.disabled and b.text == "BUY $15.00", "too little money: '%s' disabled" % b.text)
 	var money := Game.money
 	await click(b)
@@ -89,6 +105,7 @@ func _shop() -> void:
 	await click(b)
 	check("chendol" in Game.unlocked and Game.money == money, "bought chendol for $15 (money %s)" % Game.fmt(Game.money))
 	check(b.disabled and b.text == "ON MENU", "button says '%s'" % b.text)
+	check(stall.board_lit("chendol"), "lightbox: chendol lit once bought")
 	check("chendol" in _read_save().get("unlocked", []), "purchase saved")
 	var ts: Button = p.buy_buttons.get("tau_suan")
 	check(ts.disabled and ts.text == "BUY $25.00", "tau suan: '%s' disabled" % ts.text)
@@ -99,6 +116,26 @@ func _shop() -> void:
 	check("tau_suan" in Game.unlocked and Game.money == money, "bought tau suan for $25")
 	await click(p.shop_back_button)
 	check(p._summary.visible, "BACK returns to the summary")
+
+
+const NEW_ITEMS := {"ice_kachang_mango": 3000, "chendol_durian": 4000, "ice_kachang_durian": 4500,
+	"bobo_chacha": 6000, "pulut_hitam": 7500}
+
+
+func _buy_the_rest() -> void:
+	print("-- shop: the five post-v1 desserts")
+	var p: DayPanel = stall.day_panel
+	var money := Game.money
+	for id in NEW_ITEMS:
+		Game.earn(NEW_ITEMS[id])
+		await click(p.shop_button)
+		var b: Button = p.buy_buttons[id]
+		check(b.text == "BUY " + Game.fmt(NEW_ITEMS[id]) and not b.disabled, "%s: '%s'" % [id, b.text])
+		await click(b)
+		check(id in Game.unlocked and Game.money == money, "bought %s" % id)
+		await click(p.shop_back_button)
+	var n := RecipeBook.makeable(true).size() + 2 + NEW_ITEMS.size()
+	check(Game.unlocked.size() == n and _read_save().get("unlocked", []).size() == n, "all %d on the menu and saved" % n)
 
 
 func _next_day() -> void:
@@ -112,15 +149,50 @@ func _next_day() -> void:
 	check(c != null, "customers come again")
 
 
-func _make_chendol() -> void:
-	print("-- chendol can be made")
-	await _start("chendol")
-	var res := await make("chendol")
-	check(res.get("correct", false) and res.stars == 3, "chendol served correct, 3 stars: %s" % [res])
-	print("-- tau suan can be made")
+func _make_bought() -> void:
+	for id in ["chendol", "tau_suan"] + NEW_ITEMS.keys():
+		print("-- %s can be made" % id)
+		await _start(id)
+		var res := await make(id)
+		check(res.get("correct", false) and res.stars == 3, "%s served correct, 3 stars: %s" % [id, res])
+
+
+func _upgrades() -> void:
+	print("-- upgrades: big ladle, fast shaver")
+	await _start("ice_kachang")
+	await tap("bowl_stack")
+	await hold("shaver", 1.0)
+	check(st.bowl.fill > 0.5 and st.bowl.fill < 0.8, "before: 1 s of shaving is not full (%.2f)" % st.bowl.fill)
+	st.ui.back_pressed.emit()
+	await _wait(1.0)
+	var money := Game.money
+	var p: DayPanel = stall.day_panel
+	Game.last_day = {"day": Game.day, "served": 0, "gave_up": 0, "earned": 0}
+	p.show_summary()
+	for id in ["big_ladle", "fast_shaver"]:
+		Game.earn(Game.UPGRADES[id].cost)
+		await click(p.shop_button)
+		var b: Button = p.buy_buttons[id]
+		check(b.text == "BUY " + Game.fmt(Game.UPGRADES[id].cost) and not b.disabled, "%s: '%s'" % [id, b.text])
+		await click(b)
+		check(Game.has_upgrade(id) and Game.money == money and b.text == "IN USE", "bought %s: '%s'" % [id, b.text])
+		await click(p.shop_back_button)
+	check(_read_save().get("upgrades", []) == ["big_ladle", "fast_shaver"], "upgrades saved")
+	p.hide_panel()
+	await _start("ice_kachang")
+	await tap("bowl_stack")
+	await hold("shaver", 1.0)
+	check(st.bowl.fill == 1.0, "fast shaver: full in 1 s (%.2f)" % st.bowl.fill)
+	st.ui.back_pressed.emit()
+	await _wait(1.0)
 	await _start("tau_suan")
-	res = await make("tau_suan")
-	check(res.get("correct", false) and res.stars == 3, "tau suan served correct, 3 stars: %s" % [res])
+	await tap("soup_stack")
+	for i in 2:
+		await tap("pot:tau_suan_soup")
+		await _wait(1.4)
+	check(st.bowl.fill == 1.0, "big ladle: two ladles fill the bowl (%.2f)" % st.bowl.fill)
+	st.ui.back_pressed.emit()
+	await _wait(1.0)
 
 
 func _weather_and_mute() -> void:
@@ -138,7 +210,25 @@ func _weather_and_mute() -> void:
 	Game.weather = "rainy"
 	check(Game.quota() < sunny_quota, "fewer customers when it rains (%d vs %d)" % [Game.quota(), sunny_quota])
 	var rainy_soup := _soup_share()
-	check(sunny_soup < 0.2 and rainy_soup > 0.45, "soup orders: %.0f%% sunny, %.0f%% rainy" % [sunny_soup * 100, rainy_soup * 100])
+	check(sunny_soup < 0.35 and rainy_soup > 0.4 and rainy_soup > sunny_soup + 0.15, "soup orders: %.0f%% sunny, %.0f%% rainy" % [sunny_soup * 100, rainy_soup * 100])
+	for w in ["sunny", "rainy"]:
+		Game.weather = w
+		var picks := {}
+		var repeats := 0
+		var prev := ""
+		for i in 3000:
+			var id := Game.pick_order()
+			picks[id] = picks.get(id, 0) + 1
+			repeats += int(id == prev)
+			prev = id
+		var rarest := Game.unlocked[0]
+		for id in Game.unlocked:
+			if picks.get(id, 0) < picks.get(rarest, 0):
+				rarest = id
+		var share: float = picks.get(rarest, 0) / 3000.0
+		check(share >= 0.03, "%s: every item ordered, rarest %s %.1f%%" % [w, rarest, share * 100])
+		check(repeats == 0, "%s: never the same dessert twice in a row (%d repeats)" % [w, repeats])
+	Game.weather = "rainy"
 	stall._apply_weather("rainy")
 	check(stall.rain.visible and Sound.is_raining() and stall.sun.light_energy < 1.0, "rainy look and sound")
 	await _wait(0.2)
@@ -158,7 +248,7 @@ func _weather_and_mute() -> void:
 	check(not Game.muted and not AudioServer.is_bus_mute(bus), "tap again: sound on")
 
 
-## Share of soup orders over many picks with every v1 item unlocked.
+## Share of soup orders over many picks with every item unlocked.
 func _soup_share() -> float:
 	var soup := 0
 	for i in 1000:
@@ -168,7 +258,8 @@ func _soup_share() -> float:
 
 func _write_expect() -> void:
 	var f := FileAccess.open(EXPECT, FileAccess.WRITE)
-	f.store_string(JSON.stringify({"money": Game.money, "day": Game.day, "unlocked": Game.unlocked}))
+	f.store_string(JSON.stringify({"money": Game.money, "day": Game.day, "unlocked": Game.unlocked,
+		"upgrades": Game.upgrades}))
 	f.close()
 	print("  wrote %s for --daycheck" % EXPECT)
 
@@ -182,11 +273,25 @@ func _restart_restores() -> void:
 	check(Game.money == int(want.money), "money %s (want %s)" % [Game.fmt(Game.money), Game.fmt(int(want.money))])
 	check(Game.day == int(want.day), "day %d (want %d)" % [Game.day, int(want.day)])
 	check(str(Game.unlocked) == str(want.unlocked), "unlocked %s" % [Game.unlocked])
+	check(str(Game.upgrades) == str(want.upgrades) and Game.upgrades.size() == 2, "upgrades %s" % [Game.upgrades])
 	check(q.quota == Game.quota(), "today's quota %d" % q.quota)
 	check(Game.weather == Game.weather_for(Game.day) and stall.rain.visible == (Game.weather == "rainy"),
 		"same weather as before the restart: %s" % Game.weather)
 	check(not Game.muted, "sound on after the restart")
 	DirAccess.remove_absolute(EXPECT)
+	# M18: a save from before green bean soup gets it free and keeps what was bought
+	var old_save := "user://save_old_test.json"
+	var f := FileAccess.open(old_save, FileAccess.WRITE)
+	f.store_string(JSON.stringify({"version": 1, "money": 1234, "day": 5, "unlocked": ["ice_kachang", "mango_milk_ice", "chendol", "tau_suan"]}))
+	f.close()
+	var keep := Game.save_path
+	Game.unlocked.assign(RecipeBook.makeable(true))
+	Game.save_path = old_save
+	Game.load_game()
+	Game.save_path = keep
+	check("green_bean_soup" in Game.unlocked and "chendol" in Game.unlocked and "tau_suan" in Game.unlocked and Game.money == 1234,
+		"old save: green bean soup added, purchases kept %s" % [Game.unlocked])
+	DirAccess.remove_absolute(old_save)
 
 
 func _read_save() -> Dictionary:
@@ -197,7 +302,7 @@ func _read_save() -> Dictionary:
 ## Left click in the middle of a control, the way the GUI gets a tap on a phone.
 func click(c: Control) -> void:
 	await get_tree().process_frame
-	var p := c.get_global_rect().get_center()
+	var p := UiKit.to_screen(c.get_global_rect().get_center())
 	for pressed in [true, false]:
 		var e := InputEventMouseButton.new()
 		e.button_index = MOUSE_BUTTON_LEFT

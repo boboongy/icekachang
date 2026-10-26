@@ -17,6 +17,11 @@ const FACE_FRONT := 0.9            ## further back: turned to the front of the q
 
 var type_id := ""
 var item_id := ""                  ## what they ordered
+var cold := false                  ## the cold bobo chacha (ice cubes in it)
+var item2 := ""                    ## a second, different dessert ("" = one dessert)
+var cold2 := false                 ## the second one is the cold bobo chacha
+var made := {}                     ## 2-dessert order: item id -> {res, bowl} of the one waiting on the tray
+var patience_secs := 60.0          ## seconds from full patience to giving up (set by the queue)
 var state := State.WALK_IN
 var patience := 1.0                ## 1 = just arrived, 0 = gives up
 var order_line := ""               ## the Singlish line in the order bubble
@@ -43,6 +48,14 @@ func _init(template: Node3D, type: String) -> void:
 	for n in ["leg_l", "leg_r"]:
 		_legs.append(_model.find_child(prefix + n, true, false))
 	_t = randf() * 10.0
+
+
+## Their order, first dessert first: [{item, cold}], two entries for a 2-dessert order.
+func orders() -> Array[Dictionary]:
+	var out: Array[Dictionary] = [{"item": item_id, "cold": cold}]
+	if item2 != "":
+		out.append({"item": item2, "cold": cold2})
+	return out
 
 
 func walk_to(points: Array[Vector3]) -> void:

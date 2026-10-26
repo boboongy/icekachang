@@ -75,7 +75,10 @@ func _tutorial_by_arrow() -> void:
 			check(false, "arrow lost (hint '%s')" % st.ui._hint_base)
 			break
 		await get_tree().process_frame
-		var p := tut.pointer.duplicate()
+		var p := tut.pointer.duplicate()     # UI positions -> screen for the touches
+		p.at = UiKit.to_screen(p.at)
+		if p.has("to"):
+			p.to = UiKit.to_screen(p.to)
 		saw_serve = saw_serve or tut.step == Tutorial.Step.SERVE
 		moves += 1
 		if p.has("to"):
@@ -170,7 +173,7 @@ func _start_over() -> void:
 	await click(b)
 	check(Game.money > 0 and b.text == "SURE? TAP", "first tap asks: '%s'" % b.text)
 	await click(b)
-	check(Game.money == 0 and Game.day == 1 and Game.unlocked == RecipeBook.makeable(true), "progress wiped")
+	check(Game.money == 0 and Game.day == 1 and Game.unlocked == RecipeBook.makeable(true) and Game.upgrades.is_empty(), "progress wiped")
 	check(menus.title_page.visible and menus.play_button.text == "PLAY", "back to the title, PLAY")
 	check(Game.quality == "low" and not Game.music, "settings kept")
 
@@ -192,7 +195,7 @@ func _drag_px(a: Vector2, b: Vector2) -> void:
 	for i in range(1, 11):
 		var p := a.lerp(b, i / 10.0)
 		var e := InputEventScreenDrag.new()
-		e.index = 0
+		e.index = TOUCH_ID
 		e.position = p
 		e.relative = p - last
 		last = p
